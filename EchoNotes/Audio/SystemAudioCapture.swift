@@ -1,0 +1,101 @@
+import ScreenCaptureKit
+import AVFoundation
+import CoreMedia
+
+/// Captures system-wide audio output using ScreenCaptureKit's audio API.
+///
+/// **AUDIO-ONLY MODE** — No video, screen, or visual data is captured.
+///
+/// This captures what the user hears (system audio output):
+/// - Other people on calls (Zoom, Meet, FaceTime, Discord, etc.)
+/// - Any audio playing through the system
+///
+/// Requires "Screen & System Audio Recording" permission (macOS requirement for audio API access).
+final class SystemAudioCapture: NSObject, @unchecked Sendable {
+    var onBuffer: ((TimestampedBuffer) -> Void)?
+
+    private var stream: SCStream?
+    private var isCapturing = false
+
+    /// Start capturing system audio at the given sample rate (mono Float32).
+    func startCapture(sampleRate: Double = 48000) async throws {
+        guard !isCapturing else { return }
+
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let display = content.displays.first else {
+            throw CaptureError.noDisplayFound
+        }
+
+        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let config = SCStreamConfiguration()
+
+        // Audio-only configuration
+        config.capturesAudio = true
+        config.sampleRate = Int(sampleRate)
+        config.channelCount = 1
+        config.excludesCurrentProcessAudio = true
+
+        // Set minimal video config (we only register for .audio output, so no video data is processed)
+        config.width = 2
+        config.height = 2
+        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
+        config.showsCursor = false
+
+        let stream = SCStream(filter: filter, configuration: config, delegate: self)
+        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+        try await stream.startCapture()
+
+        self.stream = stream
+        isCapturing = true
+    }
+
+    func stopCapture() async {
+        guard isCapturing, let stream else { return }
+        try? await stream.stopCapture()
+        self.stream = nil
+        isCapturing = false
+    }
+}
+
+extension SystemAudioCapture: SCStreamOutput {
+    /// Receives audio sample buffers from ScreenCaptureKit.
+    /// We only registered for .audio type, so no video data is processed here.
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        // Only process audio buffers (we only registered for .audio type)
+        guard type == .audio, sampleBuffer.isValid else { return }
+        guard let dataBuffer = sampleBuffer.dataBuffer else { return }
+
+        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let length = dataBuffer.dataLength
+
+        do {
+            var rawData = Data(count: length)
+            try rawData.withUnsafeMutableBytes { ptr in
+                try dataBuffer.copyDataBytes(to: ptr)
+            }
+            let floatCount = length / MemoryLayout<Float>.size
+            let samples = rawData.withUnsafeBytes { ptr in
+                Array(ptr.bindMemory(to: Float.self).prefix(floatCount))
+            }
+            onBuffer?(TimestampedBuffer(samples: samples, timestamp: timestamp, source: .system))
+        } catch {
+            print("Error extracting system audio: \(error)")
+        }
+    }
+}
+
+extension SystemAudioCapture: SCStreamDelegate {
+    func stream(_ stream: SCStream, didStopWithError error: Error) {
+        print("System audio stream error: \(error)")
+        isCapturing = false
+    }
+}
+
+enum CaptureError: LocalizedError {
+    case noDisplayFound
+    var errorDescription: String? {
+        switch self {
+        case .noDisplayFound: return "No display found for audio capture."
+        }
+    }
+}
