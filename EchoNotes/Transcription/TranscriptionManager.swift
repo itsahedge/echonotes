@@ -30,12 +30,6 @@ final class TranscriptionManager: ObservableObject {
     /// The model to use for transcription.
     var selectedModel: WhisperModel = .base
 
-    /// Whether the model is currently being downloaded.
-    var isDownloadingModel: Bool { modelManager.isDownloading }
-
-    /// Model download progress (0.0–1.0).
-    var downloadProgress: Double { modelManager.downloadProgress }
-
     /// Prepare the streaming transcriber with a loaded engine.
     func prepareForLiveTranscription() async throws {
         let engine = try await modelManager.ensureEngine(for: selectedModel)
