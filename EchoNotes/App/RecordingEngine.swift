@@ -60,10 +60,7 @@ final class RecordingEngine: ObservableObject {
 
         do {
             // Set up audio file writer (M4A/AAC, 48kHz stereo — system L, mic R)
-            let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: 48000, channels: 2)
-
-            // Surface write errors (e.g. disk full) to the UI
-            writer.onError = { [weak self] error in
+            let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: 48000, channels: 2) { [weak self] error in
                 Task { @MainActor in
                     self?.errorMessage = "Recording error: \(error.localizedDescription)"
                     await self?.stopRecording()
@@ -113,7 +110,13 @@ final class RecordingEngine: ObservableObject {
             }
 
             try await systemCapture.startCapture(sampleRate: 48000)
-            try micCapture.startCapture(sampleRate: 48000)
+            do {
+                try micCapture.startCapture(sampleRate: 48000)
+            } catch {
+                // System capture already started — must stop it before bailing
+                await systemCapture.stopCapture()
+                throw error
+            }
 
             recordingStartTime = Date()
             isRecording = true
@@ -127,6 +130,7 @@ final class RecordingEngine: ObservableObject {
             }
         } catch {
             errorMessage = "Failed to start recording: \(error.localizedDescription)"
+            audioWriter?.finalize()
             cleanup()
         }
     }
