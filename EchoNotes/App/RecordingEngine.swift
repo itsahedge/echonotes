@@ -24,12 +24,12 @@ final class RecordingEngine: ObservableObject {
     private var recordingStartTime: Date?
 
     /// Save location for recordings.
-    var saveDirectory: URL {
+    lazy var saveDirectory: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let dir = docs.appendingPathComponent("EchoNotes", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
+    }()
 
     func startRecording() async {
         guard !isRecording else { return }
