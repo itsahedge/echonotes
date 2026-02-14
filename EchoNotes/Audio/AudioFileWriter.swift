@@ -88,8 +88,16 @@ final class AudioFileWriter: @unchecked Sendable {
             channelData[1][i] = micSamples[i]
         }
 
-        systemSamples.removeFirst(count)
-        micSamples.removeFirst(count)
+        if count == systemSamples.count {
+            systemSamples.removeAll(keepingCapacity: true)
+        } else {
+            systemSamples.removeFirst(count)
+        }
+        if count == micSamples.count {
+            micSamples.removeAll(keepingCapacity: true)
+        } else {
+            micSamples.removeFirst(count)
+        }
 
         do {
             try file.write(from: pcmBuffer)

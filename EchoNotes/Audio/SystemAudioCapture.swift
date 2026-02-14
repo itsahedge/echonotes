@@ -1,6 +1,7 @@
 import ScreenCaptureKit
 import AVFoundation
 import CoreMedia
+import os
 
 /// Captures system-wide audio output using ScreenCaptureKit's audio API.
 ///
@@ -16,11 +17,11 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
     var onError: ((Error) -> Void)?
 
     private var stream: SCStream?
-    private var isCapturing = false
+    private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
 
     /// Start capturing system audio at the given sample rate (mono Float32).
     func startCapture(sampleRate: Double = 48000) async throws {
-        guard !isCapturing else { return }
+        guard _isCapturing.withLock({ !$0 }) else { return }
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
@@ -47,14 +48,14 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
         try await stream.startCapture()
 
         self.stream = stream
-        isCapturing = true
+        _isCapturing.withLock { $0 = true }
     }
 
     func stopCapture() async {
-        guard isCapturing, let stream else { return }
+        guard _isCapturing.withLock({ $0 }), let stream else { return }
         try? await stream.stopCapture()
         self.stream = nil
-        isCapturing = false
+        _isCapturing.withLock { $0 = false }
     }
 }
 
@@ -87,7 +88,7 @@ extension SystemAudioCapture: SCStreamOutput {
 extension SystemAudioCapture: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         print("System audio stream error: \(error)")
-        isCapturing = false
+        _isCapturing.withLock { $0 = false }
         onError?(error)
     }
 }

@@ -50,22 +50,15 @@ final class WhisperEngine: @unchecked Sendable {
         // Convert M4A → 16kHz mono Float32 PCM (left channel only)
         let samples = try await convertAudioToWhisperFormat(audioURL: audioURL)
 
-        // Run inference on a background thread
+        // Run inference off the main thread
         let ctx = context
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[TranscriptSegment], Error>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                do {
-                    let segments = try Self.runInference(
-                        context: ctx,
-                        samples: samples,
-                        progressCallback: progressCallback
-                    )
-                    continuation.resume(returning: segments)
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.runInference(
+                context: ctx,
+                samples: samples,
+                progressCallback: progressCallback
+            )
+        }.value
     }
 
     /// Convert an M4A file to 16kHz mono Float32 PCM, extracting the left channel.
