@@ -11,6 +11,9 @@ final class RecordingEngine: ObservableObject {
     @Published var micLevel: Float = 0
     @Published var systemLevel: Float = 0
     @Published var errorMessage: String?
+    @Published var lastRecordingURL: URL?
+
+    let transcriptionManager = TranscriptionManager()
 
     private let systemCapture = SystemAudioCapture()
     private let micCapture = MicrophoneCapture()
@@ -101,6 +104,8 @@ final class RecordingEngine: ObservableObject {
         systemLevel = 0
 
         if let url {
+            lastRecordingURL = url
+            transcriptionManager.reset()
             print("Recording saved: \(url.path)")
             // Reveal in Finder
             NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
