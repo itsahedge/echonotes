@@ -8,3 +8,4 @@ DerivedData/
 *.m4a
 *.wav
 AUDIO-ONLY-UPDATE-SUMMARY.md
+*.app

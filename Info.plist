@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.echonotes.app</string>
+    <key>CFBundleName</key>
+    <string>EchoNotes</string>
+    <key>CFBundleDisplayName</key>
+    <string>EchoNotes</string>
+    <key>CFBundleExecutable</key>
+    <string>EchoNotes</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>EchoNotes needs microphone access to record your voice.</string>
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>EchoNotes needs Screen Recording permission to capture system audio (audio only — no video is recorded).</string>
+</dict>
+</plist>
