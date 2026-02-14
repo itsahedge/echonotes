@@ -98,23 +98,43 @@ final class ModelManager: ObservableObject {
         }
 
         let totalBytes = response.expectedContentLength
-        var data = Data()
-        if totalBytes > 0 {
-            data.reserveCapacity(Int(totalBytes))
-        }
+        let bufferSize = 65536 // 64KB chunks
+        var buffer = Data()
+        buffer.reserveCapacity(bufferSize)
+
+        // Write progressively to a temp file instead of accumulating in memory
+        let tempURL = destination.appendingPathExtension("download")
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        let fileHandle = try FileHandle(forWritingTo: tempURL)
+        defer { try? fileHandle.close() }
 
         var downloadedBytes: Int64 = 0
         for try await byte in asyncBytes {
-            data.append(byte)
-            downloadedBytes += 1
-            if totalBytes > 0 && downloadedBytes % 65536 == 0 {
-                let progress = Double(downloadedBytes) / Double(totalBytes)
-                await MainActor.run { self.downloadProgress = progress }
+            buffer.append(byte)
+            if buffer.count >= bufferSize {
+                fileHandle.write(buffer)
+                downloadedBytes += Int64(buffer.count)
+                buffer.removeAll(keepingCapacity: true)
+                if totalBytes > 0 {
+                    let progress = Double(downloadedBytes) / Double(totalBytes)
+                    await MainActor.run { self.downloadProgress = progress }
+                }
             }
         }
+        // Flush remaining bytes
+        if !buffer.isEmpty {
+            fileHandle.write(buffer)
+            downloadedBytes += Int64(buffer.count)
+        }
+        try fileHandle.close()
+
+        // Atomic move to final destination
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try FileManager.default.removeItem(at: destination)
+        }
+        try FileManager.default.moveItem(at: tempURL, to: destination)
 
         await MainActor.run { self.downloadProgress = 1.0 }
-        try data.write(to: destination, options: .atomic)
         return destination
     }
 }

@@ -10,6 +10,7 @@ final class TranscriptionManager: ObservableObject {
 
     let modelManager = ModelManager()
     private var whisperEngine: WhisperEngine?
+    private var loadedModel: WhisperModel?
 
     /// The model to use for transcription.
     var selectedModel: WhisperModel = .baseEn
@@ -34,9 +35,10 @@ final class TranscriptionManager: ObservableObject {
             // Step 1: Ensure model is downloaded
             let modelPath = try await modelManager.ensureModel(selectedModel)
 
-            // Step 2: Load engine if needed
-            if whisperEngine == nil {
+            // Step 2: Load engine if needed (or reload if model changed)
+            if whisperEngine == nil || loadedModel != selectedModel {
                 whisperEngine = try WhisperEngine(modelPath: modelPath)
+                loadedModel = selectedModel
             }
 
             // Step 3: Run transcription

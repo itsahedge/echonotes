@@ -60,7 +60,8 @@ struct MenuBarView: View {
             }
         }
         .padding()
-        .frame(width: 320, height: 360)
+        .frame(width: 320)
+        .frame(minHeight: 280, maxHeight: 500)
     }
 
     // MARK: - State Views
@@ -90,6 +91,11 @@ struct MenuBarView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
+            Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
+                .font(.caption)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
         }
         .frame(maxHeight: .infinity)
     }
