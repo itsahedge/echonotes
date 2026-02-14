@@ -78,6 +78,10 @@ final class StreamingTranscriber: ObservableObject {
         totalSamplesProcessed = 0
         isProcessing = false
         error = nil
+        
+        // Clear queued samples — these are intentionally dropped on reset.
+        // If you need to preserve in-flight audio, call flush() before reset().
+        queuedSamples = []
 
         sampleLock.lock()
         incomingSamples = []
