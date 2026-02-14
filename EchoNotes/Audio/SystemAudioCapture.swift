@@ -37,15 +37,40 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
         config.channelCount = 1
         config.excludesCurrentProcessAudio = true
 
-        // Set minimal video config (we only register for .audio output, so no video data is processed)
-        config.width = 2
-        config.height = 2
+        // WORKAROUND: ScreenCaptureKit requires video configuration even for audio-only streams.
+        // As of macOS 14, there's no official API to create a purely audio-only SCStream.
+        // We set minimal dimensions (2x2) to minimize overhead since we only register for .audio output.
+        // Apple could change minimum dimension requirements in future OS versions.
+        // If this fails, we fall back to slightly larger dimensions.
+        let minWidth = 2
+        let minHeight = 2
+        let fallbackWidth = 16
+        let fallbackHeight = 16
+        
+        config.width = minWidth
+        config.height = minHeight
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
         config.showsCursor = false
-
+        
+        // Defensive guard: If Apple changes minimum requirements, try fallback dimensions
+        // Note: This is a best-effort approach. The real solution would be an audio-only API from Apple.
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
-        try await stream.startCapture()
+        
+        do {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+            try await stream.startCapture()
+        } catch {
+            // If minimal dimensions fail, retry with fallback dimensions
+            // This handles potential future macOS changes to minimum dimension requirements
+            config.width = fallbackWidth
+            config.height = fallbackHeight
+            let fallbackStream = SCStream(filter: filter, configuration: config, delegate: self)
+            try fallbackStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+            try await fallbackStream.startCapture()
+            self.stream = fallbackStream
+            _isCapturing.withLock { $0 = true }
+            return
+        }
 
         self.stream = stream
         _isCapturing.withLock { $0 = true }

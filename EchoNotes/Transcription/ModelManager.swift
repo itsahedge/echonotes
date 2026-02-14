@@ -52,7 +52,18 @@ final class ModelManager: ObservableObject {
 
         do {
             let config = WhisperKitConfig(model: model.rawValue)
+            
+            // Start progress monitoring task
+            // WhisperKit doesn't expose download progress callbacks, so we poll the cache directory size
+            let progressTask = Task {
+                await monitorDownloadProgress(for: model)
+            }
+            
             let kit = try await WhisperKit(config)
+            
+            // Cancel progress monitoring once download completes
+            progressTask.cancel()
+            
             self.whisperKit = kit
             self.loadedModel = model
             self.downloadProgress = 1.0
@@ -61,6 +72,53 @@ final class ModelManager: ObservableObject {
             self.error = "Failed to load model: \(error.localizedDescription)"
             throw error
         }
+    }
+    
+    /// Monitor cache directory size to estimate download progress.
+    /// This is a workaround since WhisperKit doesn't expose progress callbacks.
+    private func monitorDownloadProgress(for model: WhisperModel) async {
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+        let expectedSizeMB = model.approximateSizeMB
+        let expectedBytes = Int64(expectedSizeMB) * 1_024 * 1_024
+        
+        while !Task.isCancelled {
+            do {
+                // Get total size of cache directory
+                let currentSize = try directorySize(at: modelDir)
+                let progress = min(Double(currentSize) / Double(expectedBytes), 0.99) // Cap at 99% until WhisperKit completes
+                
+                await MainActor.run {
+                    self.downloadProgress = progress
+                }
+                
+                // Poll every 500ms
+                try await Task.sleep(for: .milliseconds(500))
+            } catch {
+                // Directory doesn't exist yet or other error - keep waiting
+                try? await Task.sleep(for: .milliseconds(500))
+            }
+        }
+    }
+    
+    /// Calculate total size of a directory recursively.
+    private func directorySize(at url: URL) throws -> Int64 {
+        let fileManager = FileManager.default
+        guard fileManager.fileExists(atPath: url.path) else {
+            return 0
+        }
+        
+        var totalSize: Int64 = 0
+        let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])
+        
+        while let fileURL = enumerator?.nextObject() as? URL {
+            if let resourceValues = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+               let fileSize = resourceValues.fileSize {
+                totalSize += Int64(fileSize)
+            }
+        }
+        
+        return totalSize
     }
 
     /// Check if WhisperKit models are likely cached.
