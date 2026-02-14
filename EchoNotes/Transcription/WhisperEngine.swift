@@ -127,6 +127,11 @@ final class WhisperEngine: @unchecked Sendable {
             throw WhisperError.audioConversionFailed
         }
 
+        final class DoneFlag: @unchecked Sendable {
+            var value = false
+        }
+        let doneFlag = DoneFlag()
+
         var framesRead: AVAudioFramePosition = 0
         while framesRead < totalFrames {
             let framesToRead = min(chunkSize, AVAudioFrameCount(totalFrames - framesRead))
@@ -142,10 +147,7 @@ final class WhisperEngine: @unchecked Sendable {
             }
 
             // Resample chunk to 16kHz
-            final class DoneFlag: @unchecked Sendable {
-                var value = false
-            }
-            let doneFlag = DoneFlag()
+            doneFlag.value = false
             let chunkRef = monoChunk
             let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
                 if doneFlag.value {

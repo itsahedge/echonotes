@@ -1,5 +1,4 @@
 import AVFoundation
-import CoreMedia
 
 /// Captures microphone audio using AVAudioEngine.
 /// Outputs mono Float32 PCM at the requested sample rate.
@@ -62,10 +61,8 @@ final class MicrophoneCapture: @unchecked Sendable {
         guard let channelData = outputBuffer.floatChannelData else { return }
 
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(outputBuffer.frameLength)))
-        let seconds = AVAudioTime.seconds(forHostTime: time.hostTime)
-        let cmTime = CMTime(seconds: seconds, preferredTimescale: Int32(targetFormat.sampleRate))
 
-        onBuffer?(TimestampedBuffer(samples: samples, timestamp: cmTime, source: .microphone))
+        onBuffer?(TimestampedBuffer(samples: samples, source: .microphone))
     }
 }
 

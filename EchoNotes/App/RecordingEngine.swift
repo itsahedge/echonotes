@@ -51,20 +51,37 @@ final class RecordingEngine: ObservableObject {
         do {
             // Set up audio file writer (M4A/AAC, 48kHz stereo — system L, mic R)
             let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: 48000, channels: 2)
+
+            // Surface write errors (e.g. disk full) to the UI
+            writer.onError = { [weak self] error in
+                Task { @MainActor in
+                    self?.errorMessage = "Recording error: \(error.localizedDescription)"
+                    await self?.stopRecording()
+                }
+            }
+
             audioWriter = writer
+
+            // Surface system audio capture errors to the UI
+            systemCapture.onError = { [weak self] error in
+                Task { @MainActor in
+                    self?.errorMessage = "System audio error: \(error.localizedDescription)"
+                    await self?.stopRecording()
+                }
+            }
 
             // Start captures with callbacks that feed the writer
             systemCapture.onBuffer = { [weak self] buffer in
                 self?.audioWriter?.writeSystemBuffer(buffer)
                 Task { @MainActor in
-                    self?.systemLevel = AudioFormats.rmsLevel(buffer.samples)
+                    self?.systemLevel = TimestampedBuffer.rmsLevel(buffer.samples)
                 }
             }
 
             micCapture.onBuffer = { [weak self] buffer in
                 self?.audioWriter?.writeMicBuffer(buffer)
                 Task { @MainActor in
-                    self?.micLevel = AudioFormats.rmsLevel(buffer.samples)
+                    self?.micLevel = TimestampedBuffer.rmsLevel(buffer.samples)
                 }
             }
 
@@ -109,8 +126,6 @@ final class RecordingEngine: ObservableObject {
             lastRecordingURL = url
             transcriptionManager.reset()
             print("Recording saved: \(url.path)")
-            // Reveal in Finder
-            NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
 
             // Auto-transcribe if enabled
             if autoTranscribe {

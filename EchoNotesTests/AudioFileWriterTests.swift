@@ -1,6 +1,5 @@
 import Testing
 import AVFoundation
-import CoreMedia
 @testable import EchoNotes
 
 @Suite("AudioFileWriter")
@@ -13,11 +12,7 @@ struct AudioFileWriterTests {
     }
 
     func makeBuffer(samples: [Float], source: TimestampedBuffer.AudioSource) -> TimestampedBuffer {
-        TimestampedBuffer(
-            samples: samples,
-            timestamp: CMTime(value: 0, timescale: 48000),
-            source: source
-        )
+        TimestampedBuffer(samples: samples, source: source)
     }
 
     @Test("Creates output file with audio data")

@@ -13,6 +13,7 @@ import CoreMedia
 /// Requires "Screen & System Audio Recording" permission (macOS requirement for audio API access).
 final class SystemAudioCapture: NSObject, @unchecked Sendable {
     var onBuffer: ((TimestampedBuffer) -> Void)?
+    var onError: ((Error) -> Void)?
 
     private var stream: SCStream?
     private var isCapturing = false
@@ -65,7 +66,6 @@ extension SystemAudioCapture: SCStreamOutput {
         guard type == .audio, sampleBuffer.isValid else { return }
         guard let dataBuffer = sampleBuffer.dataBuffer else { return }
 
-        let timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let length = dataBuffer.dataLength
 
         do {
@@ -77,7 +77,7 @@ extension SystemAudioCapture: SCStreamOutput {
             let samples = rawData.withUnsafeBytes { ptr in
                 Array(ptr.bindMemory(to: Float.self).prefix(floatCount))
             }
-            onBuffer?(TimestampedBuffer(samples: samples, timestamp: timestamp, source: .system))
+            onBuffer?(TimestampedBuffer(samples: samples, source: .system))
         } catch {
             print("Error extracting system audio: \(error)")
         }
@@ -88,6 +88,7 @@ extension SystemAudioCapture: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         print("System audio stream error: \(error)")
         isCapturing = false
+        onError?(error)
     }
 }
 
