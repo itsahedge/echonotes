@@ -147,6 +147,15 @@ struct MenuBarView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            Button(action: { tm.cancel() }) {
+                HStack {
+                    Image(systemName: "xmark.circle")
+                    Text("Cancel")
+                }
+                .font(.caption)
+            }
+            .buttonStyle(.bordered)
         }
         .frame(maxHeight: .infinity)
     }

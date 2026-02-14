@@ -91,44 +91,27 @@ final class ModelManager: ObservableObject {
     }
 
     private func performDownload(from remoteURL: URL, to destination: URL) async throws -> URL {
-        let (asyncBytes, response) = try await URLSession.shared.bytes(from: remoteURL)
+        let tempURL = destination.appendingPathExtension("download")
+
+        // Use URLSession download task with delegate for efficient streaming
+        let delegate = DownloadDelegate { [weak self] progress in
+            Task { @MainActor in
+                self?.downloadProgress = progress
+            }
+        }
+
+        let (downloadedURL, response) = try await URLSession.shared.download(from: remoteURL, delegate: delegate)
 
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
             throw ModelError.downloadFailed
         }
 
-        let totalBytes = response.expectedContentLength
-        let bufferSize = 65536 // 64KB chunks
-        var buffer = Data()
-        buffer.reserveCapacity(bufferSize)
-
-        // Write progressively to a temp file instead of accumulating in memory
-        let tempURL = destination.appendingPathExtension("download")
-        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
-        let fileHandle = try FileHandle(forWritingTo: tempURL)
-        defer { try? fileHandle.close() }
-
-        var downloadedBytes: Int64 = 0
-        for try await byte in asyncBytes {
-            buffer.append(byte)
-            if buffer.count >= bufferSize {
-                fileHandle.write(buffer)
-                downloadedBytes += Int64(buffer.count)
-                buffer.removeAll(keepingCapacity: true)
-                if totalBytes > 0 {
-                    let progress = Double(downloadedBytes) / Double(totalBytes)
-                    await MainActor.run { self.downloadProgress = progress }
-                }
-            }
+        // Move from system temp to our temp location, then atomic move to final
+        if FileManager.default.fileExists(atPath: tempURL.path) {
+            try FileManager.default.removeItem(at: tempURL)
         }
-        // Flush remaining bytes
-        if !buffer.isEmpty {
-            fileHandle.write(buffer)
-            downloadedBytes += Int64(buffer.count)
-        }
-        try fileHandle.close()
+        try FileManager.default.moveItem(at: downloadedURL, to: tempURL)
 
-        // Atomic move to final destination
         if FileManager.default.fileExists(atPath: destination.path) {
             try FileManager.default.removeItem(at: destination)
         }
@@ -136,6 +119,35 @@ final class ModelManager: ObservableObject {
 
         await MainActor.run { self.downloadProgress = 1.0 }
         return destination
+    }
+}
+
+/// Reports download progress via URLSessionDownloadDelegate.
+private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
+    private let onProgress: @Sendable (Double) -> Void
+
+    init(onProgress: @escaping @Sendable (Double) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        guard totalBytesExpectedToWrite > 0 else { return }
+        let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
+        onProgress(progress)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        // Handled by the async download call
     }
 }
 

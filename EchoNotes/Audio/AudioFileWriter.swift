@@ -1,11 +1,31 @@
 import AVFoundation
-import CoreMedia
+
+/// A timestamped audio buffer from either system audio or microphone.
+struct TimestampedBuffer: Sendable {
+    let samples: [Float]
+    let source: AudioSource
+
+    enum AudioSource: Sendable {
+        case system
+        case microphone
+    }
+
+    /// Calculate RMS level for visualization.
+    static func rmsLevel(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let sum = samples.reduce(Float(0)) { $0 + $1 * $1 }
+        return sqrt(sum / Float(samples.count))
+    }
+}
 
 /// Writes system audio and mic audio into a single M4A file.
 /// System audio goes to the left channel, mic to the right channel.
 /// This preserves both streams for future processing while producing a single file.
 final class AudioFileWriter: @unchecked Sendable {
     let outputURL: URL
+
+    /// Called on write errors (e.g. disk full). After an error, no further writes are accepted.
+    var onError: ((Error) -> Void)?
 
     private let file: AVAudioFile
     private let sampleRate: Double
@@ -15,6 +35,7 @@ final class AudioFileWriter: @unchecked Sendable {
     // Accumulate samples from each source, flush when we have both
     private var systemSamples: [Float] = []
     private var micSamples: [Float] = []
+    private var writeError: Error?
 
     init(outputURL: URL, sampleRate: Double = 48000, channels: UInt32 = 2) throws {
         self.outputURL = outputURL
@@ -38,6 +59,7 @@ final class AudioFileWriter: @unchecked Sendable {
 
     func writeSystemBuffer(_ buffer: TimestampedBuffer) {
         lock.lock()
+        guard writeError == nil else { lock.unlock(); return }
         systemSamples.append(contentsOf: buffer.samples)
         flushIfReady()
         lock.unlock()
@@ -45,6 +67,7 @@ final class AudioFileWriter: @unchecked Sendable {
 
     func writeMicBuffer(_ buffer: TimestampedBuffer) {
         lock.lock()
+        guard writeError == nil else { lock.unlock(); return }
         micSamples.append(contentsOf: buffer.samples)
         flushIfReady()
         lock.unlock()
@@ -71,13 +94,15 @@ final class AudioFileWriter: @unchecked Sendable {
         do {
             try file.write(from: pcmBuffer)
         } catch {
-            print("Error writing audio: \(error)")
+            writeError = error
+            onError?(error)
         }
     }
 
     /// Flush any remaining samples and close the file.
     func finalize() {
         lock.lock()
+        guard writeError == nil else { lock.unlock(); return }
         // Pad the shorter stream with silence
         let maxCount = max(systemSamples.count, micSamples.count)
         if maxCount > 0 {
