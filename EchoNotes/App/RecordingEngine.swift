@@ -100,7 +100,7 @@ final class RecordingEngine: ObservableObject {
             }
         } catch {
             errorMessage = "Failed to start recording: \(error.localizedDescription)"
-            await cleanup()
+            cleanup()
         }
     }
 
@@ -115,7 +115,7 @@ final class RecordingEngine: ObservableObject {
         audioWriter?.finalize()
 
         let url = audioWriter?.outputURL
-        await cleanup()
+        cleanup()
 
         isRecording = false
         duration = 0
@@ -134,7 +134,7 @@ final class RecordingEngine: ObservableObject {
         }
     }
 
-    private func cleanup() async {
+    private func cleanup() {
         audioWriter = nil
         recordingStartTime = nil
     }
