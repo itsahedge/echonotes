@@ -16,12 +16,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupPopover()
         setupEventMonitor()
 
-        // Download Whisper model on first launch if not already present
+        // Pre-download Whisper model on first launch if not already cached
         Task {
             let manager = recorder.transcriptionManager.modelManager
             let model = recorder.transcriptionManager.selectedModel
             if !ModelManager.modelExists(model) {
-                try? await manager.ensureModel(model)
+                _ = try? await manager.ensureEngine(for: model)
             }
         }
     }

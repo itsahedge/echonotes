@@ -1,164 +1,74 @@
 import Foundation
+import WhisperKit
 
-/// Supported Whisper model sizes with download URLs and expected file sizes.
+/// Supported Whisper model sizes.
 enum WhisperModel: String, CaseIterable, Sendable {
-    case tinyEn = "ggml-tiny.en"
-    case baseEn = "ggml-base.en"
-    case smallEn = "ggml-small.en"
-    case mediumEn = "ggml-medium.en"
-
-    var filename: String { "\(rawValue).bin" }
+    case tiny = "tiny.en"
+    case base = "base.en"
+    case small = "small.en"
+    case medium = "medium.en"
 
     var displayName: String {
         switch self {
-        case .tinyEn: return "Tiny (English)"
-        case .baseEn: return "Base (English)"
-        case .smallEn: return "Small (English)"
-        case .mediumEn: return "Medium (English)"
+        case .tiny: return "Tiny (English)"
+        case .base: return "Base (English)"
+        case .small: return "Small (English)"
+        case .medium: return "Medium (English)"
         }
     }
 
-    /// Approximate download size in MB for display.
     var approximateSizeMB: Int {
         switch self {
-        case .tinyEn: return 75
-        case .baseEn: return 150
-        case .smallEn: return 500
-        case .mediumEn: return 1500
+        case .tiny: return 75
+        case .base: return 150
+        case .small: return 500
+        case .medium: return 1500
         }
-    }
-
-    var downloadURL: URL {
-        URL(string: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/\(filename)")!
     }
 }
 
-/// Manages Whisper model files — checks existence and downloads from Hugging Face.
+/// Manages WhisperKit initialization and model loading.
+/// WhisperKit handles model downloads and caching internally.
 @MainActor
 final class ModelManager: ObservableObject {
     @Published var isDownloading = false
     @Published var downloadProgress: Double = 0
     @Published var error: String?
 
-    /// Directory where models are stored.
-    nonisolated static var modelsDirectory: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return appSupport.appendingPathComponent("EchoNotes/Models", isDirectory: true)
-    }
+    private var whisperKit: WhisperKit?
+    private var loadedModel: WhisperModel?
 
-    /// Full path for a given model.
-    nonisolated static func modelPath(for model: WhisperModel) -> URL {
-        modelsDirectory.appendingPathComponent(model.filename)
-    }
-
-    /// Check if a model file exists on disk.
-    nonisolated static func modelExists(_ model: WhisperModel) -> Bool {
-        FileManager.default.fileExists(atPath: modelPath(for: model).path)
-    }
-
-    /// Ensure a model is available, downloading if necessary. Returns the file URL.
-    func ensureModel(_ model: WhisperModel) async throws -> URL {
-        let path = Self.modelPath(for: model)
-        if Self.modelExists(model) {
-            return path
+    /// Get a ready-to-use WhisperEngine, downloading the model if needed.
+    func ensureEngine(for model: WhisperModel) async throws -> WhisperEngine {
+        if let whisperKit, loadedModel == model {
+            return WhisperEngine(whisperKit: whisperKit)
         }
-        return try await downloadModel(model)
-    }
-
-    /// Download a model from Hugging Face with progress reporting.
-    @discardableResult
-    func downloadModel(_ model: WhisperModel) async throws -> URL {
-        let destination = Self.modelPath(for: model)
-
-        // Ensure directory exists
-        try FileManager.default.createDirectory(at: Self.modelsDirectory, withIntermediateDirectories: true)
 
         isDownloading = true
         downloadProgress = 0
         error = nil
 
-        defer {
-            isDownloading = false
-        }
+        defer { isDownloading = false }
 
         do {
-            let url = try await performDownload(from: model.downloadURL, to: destination)
-            return url
+            let config = WhisperKitConfig(model: model.rawValue)
+            let kit = try await WhisperKit(config)
+            self.whisperKit = kit
+            self.loadedModel = model
+            self.downloadProgress = 1.0
+            return WhisperEngine(whisperKit: kit)
         } catch {
-            self.error = "Download failed: \(error.localizedDescription)"
+            self.error = "Failed to load model: \(error.localizedDescription)"
             throw error
         }
     }
 
-    private func performDownload(from remoteURL: URL, to destination: URL) async throws -> URL {
-        let tempURL = destination.appendingPathExtension("download")
-
-        // Use URLSession download task with delegate for efficient streaming
-        let delegate = DownloadDelegate { [weak self] progress in
-            Task { @MainActor in
-                self?.downloadProgress = progress
-            }
-        }
-
-        let (downloadedURL, response) = try await URLSession.shared.download(from: remoteURL, delegate: delegate)
-
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw ModelError.downloadFailed
-        }
-
-        // Move from system temp to our temp location, then atomic move to final
-        if FileManager.default.fileExists(atPath: tempURL.path) {
-            try FileManager.default.removeItem(at: tempURL)
-        }
-        try FileManager.default.moveItem(at: downloadedURL, to: tempURL)
-
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try FileManager.default.removeItem(at: destination)
-        }
-        try FileManager.default.moveItem(at: tempURL, to: destination)
-
-        await MainActor.run { self.downloadProgress = 1.0 }
-        return destination
-    }
-}
-
-/// Reports download progress via URLSessionDownloadDelegate.
-private final class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
-    private let onProgress: @Sendable (Double) -> Void
-
-    init(onProgress: @escaping @Sendable (Double) -> Void) {
-        self.onProgress = onProgress
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64
-    ) {
-        guard totalBytesExpectedToWrite > 0 else { return }
-        let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-        onProgress(progress)
-    }
-
-    func urlSession(
-        _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL
-    ) {
-        // Handled by the async download call
-    }
-}
-
-enum ModelError: LocalizedError {
-    case downloadFailed
-    case modelNotFound
-
-    var errorDescription: String? {
-        switch self {
-        case .downloadFailed: return "Failed to download model from Hugging Face."
-        case .modelNotFound: return "Whisper model file not found."
-        }
+    /// Check if a model is likely cached (WhisperKit manages its own cache).
+    nonisolated static func modelExists(_ model: WhisperModel) -> Bool {
+        // WhisperKit handles caching internally — this is a best-effort check
+        // by looking for the model folder in the default cache location
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+        return FileManager.default.fileExists(atPath: modelDir.path)
     }
 }
