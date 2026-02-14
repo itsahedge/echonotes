@@ -32,9 +32,12 @@ final class AudioFileWriter: @unchecked Sendable {
     private let format: AVAudioFormat
     private let lock = NSLock()
 
-    // Accumulate samples from each source, flush when we have both
+    // Accumulate samples from each source, flush when we have both.
+    // Offset-based to avoid O(n) shifts — compacts periodically.
     private var systemSamples: [Float] = []
+    private var systemOffset: Int = 0
     private var micSamples: [Float] = []
+    private var micOffset: Int = 0
     private var writeError: Error?
 
     init(outputURL: URL, sampleRate: Double = 48000, channels: UInt32 = 2) throws {
@@ -75,7 +78,9 @@ final class AudioFileWriter: @unchecked Sendable {
 
     /// Write interleaved stereo whenever we have enough from both sources.
     private func flushIfReady() {
-        let count = min(systemSamples.count, micSamples.count)
+        let sysAvailable = systemSamples.count - systemOffset
+        let micAvailable = micSamples.count - micOffset
+        let count = min(sysAvailable, micAvailable)
         guard count > 0 else { return }
 
         guard let pcmBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else { return }
@@ -84,19 +89,28 @@ final class AudioFileWriter: @unchecked Sendable {
         guard let channelData = pcmBuffer.floatChannelData else { return }
         // Channel 0 = system (left), Channel 1 = mic (right)
         for i in 0..<count {
-            channelData[0][i] = systemSamples[i]
-            channelData[1][i] = micSamples[i]
+            channelData[0][i] = systemSamples[systemOffset + i]
+            channelData[1][i] = micSamples[micOffset + i]
         }
 
-        if count == systemSamples.count {
+        systemOffset += count
+        micOffset += count
+
+        // Compact when fully consumed to free memory
+        if systemOffset == systemSamples.count {
             systemSamples.removeAll(keepingCapacity: true)
-        } else {
-            systemSamples.removeFirst(count)
+            systemOffset = 0
+        } else if systemOffset > 48000 {
+            // Compact periodically to avoid unbounded growth
+            systemSamples.removeFirst(systemOffset)
+            systemOffset = 0
         }
-        if count == micSamples.count {
+        if micOffset == micSamples.count {
             micSamples.removeAll(keepingCapacity: true)
-        } else {
-            micSamples.removeFirst(count)
+            micOffset = 0
+        } else if micOffset > 48000 {
+            micSamples.removeFirst(micOffset)
+            micOffset = 0
         }
 
         do {
@@ -112,10 +126,12 @@ final class AudioFileWriter: @unchecked Sendable {
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
         // Pad the shorter stream with silence
-        let maxCount = max(systemSamples.count, micSamples.count)
+        let sysRemaining = systemSamples.count - systemOffset
+        let micRemaining = micSamples.count - micOffset
+        let maxCount = max(sysRemaining, micRemaining)
         if maxCount > 0 {
-            while systemSamples.count < maxCount { systemSamples.append(0) }
-            while micSamples.count < maxCount { micSamples.append(0) }
+            while (systemSamples.count - systemOffset) < maxCount { systemSamples.append(0) }
+            while (micSamples.count - micOffset) < maxCount { micSamples.append(0) }
             flushIfReady()
         }
         lock.unlock()

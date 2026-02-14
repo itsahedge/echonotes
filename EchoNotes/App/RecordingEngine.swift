@@ -29,10 +29,15 @@ final class RecordingEngine: ObservableObject {
     private var recordingStartTime: Date?
 
     /// Save location for recordings.
+    /// Created lazily on first access; directory creation errors surface via `errorMessage`.
     lazy var saveDirectory: URL = {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let dir = docs.appendingPathComponent("EchoNotes", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            errorMessage = "Failed to create recordings directory: \(error.localizedDescription)"
+        }
         return dir
     }()
 
