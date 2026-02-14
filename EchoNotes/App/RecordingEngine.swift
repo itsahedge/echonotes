@@ -14,6 +14,12 @@ final class RecordingEngine: ObservableObject {
     @Published var errorMessage: String?
     @Published var lastRecordingURL: URL?
     @AppStorage("autoTranscribe") var autoTranscribe = false
+    @AppStorage("transcriptionMode") var transcriptionModeRaw: String = TranscriptionMode.postRecording.rawValue
+
+    var transcriptionMode: TranscriptionMode {
+        get { TranscriptionMode(rawValue: transcriptionModeRaw) ?? .postRecording }
+        set { transcriptionModeRaw = newValue.rawValue }
+    }
 
     let transcriptionManager = TranscriptionManager()
 
@@ -70,9 +76,26 @@ final class RecordingEngine: ObservableObject {
                 }
             }
 
+            // Set up live transcription if enabled
+            let isLive = transcriptionMode == .live
+            if isLive {
+                do {
+                    try await transcriptionManager.prepareForLiveTranscription()
+                    transcriptionManager.streamingTranscriber.reset()
+                } catch {
+                    errorMessage = "Failed to prepare live transcription: \(error.localizedDescription)"
+                    cleanup()
+                    return
+                }
+            }
+
             // Start captures with callbacks that feed the writer
             systemCapture.onBuffer = { [weak self] buffer in
                 self?.audioWriter?.writeSystemBuffer(buffer)
+                // Feed system audio to streaming transcriber for live mode
+                if isLive {
+                    self?.transcriptionManager.streamingTranscriber.feedSamples(buffer.samples)
+                }
                 Task { @MainActor in
                     self?.systemLevel = TimestampedBuffer.rmsLevel(buffer.samples)
                 }
@@ -124,12 +147,17 @@ final class RecordingEngine: ObservableObject {
 
         if let url {
             lastRecordingURL = url
-            transcriptionManager.reset()
             print("Recording saved: \(url.path)")
 
-            // Auto-transcribe if enabled
-            if autoTranscribe {
-                Task { await transcriptionManager.transcribe(audioURL: url) }
+            if transcriptionMode == .live {
+                // Finalize live transcription — flush remaining chunks
+                transcriptionManager.finalizeLiveTranscription(recordingURL: url)
+            } else {
+                transcriptionManager.reset()
+                // Auto-transcribe if enabled (post-recording mode)
+                if autoTranscribe {
+                    Task { await transcriptionManager.transcribe(audioURL: url) }
+                }
             }
         }
     }
