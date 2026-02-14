@@ -57,7 +57,10 @@ final class MicrophoneCapture: @unchecked Sendable {
             return nil
         }
 
-        if error != nil { return }
+        if let error {
+            print("Mic audio conversion error: \(error)")
+            return
+        }
         guard let channelData = outputBuffer.floatChannelData else { return }
 
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(outputBuffer.frameLength)))
