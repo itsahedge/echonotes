@@ -43,6 +43,14 @@ final class RecordingEngine: ObservableObject {
     private var lastSystemLevelUpdate: Date = .distantPast
     private var lastMicLevelUpdate: Date = .distantPast
 
+    /// Reusable DateFormatter for recording filenames. Static to avoid repeated allocation.
+    private static let recordingTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        formatter.timeZone = TimeZone.current
+        return formatter
+    }()
+
     /// Save location for recordings. Directory validation happens in startRecording().
     var saveDirectory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -68,10 +76,7 @@ final class RecordingEngine: ObservableObject {
         }
 
         // Create output file with local timezone timestamp
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        formatter.timeZone = TimeZone.current
-        let timestamp = formatter.string(from: Date())
+        let timestamp = Self.recordingTimestampFormatter.string(from: Date())
         let filename = "recording-\(timestamp).m4a"
         let fileURL = saveDirectory.appendingPathComponent(filename)
 

@@ -72,7 +72,7 @@ struct MenuBarView: View {
 
     private var recordingView: some View {
         VStack(spacing: 12) {
-            Text(formatDuration(recorder.duration))
+            Text(Transcript.formatTimestamp(recorder.duration))
                 .font(.system(size: 36, weight: .light, design: .monospaced))
                 .foregroundStyle(.primary)
 
@@ -238,15 +238,4 @@ struct MenuBarView: View {
         .frame(maxHeight: .infinity)
     }
 
-    // MARK: - Helpers
-
-    private func formatDuration(_ t: TimeInterval) -> String {
-        let h = Int(t) / 3600
-        let m = (Int(t) % 3600) / 60
-        let s = Int(t) % 60
-        if h > 0 {
-            return String(format: "%d:%02d:%02d", h, m, s)
-        }
-        return String(format: "%02d:%02d", m, s)
-    }
 }
