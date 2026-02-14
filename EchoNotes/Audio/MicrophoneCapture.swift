@@ -4,15 +4,16 @@ import os
 /// Captures microphone audio using AVAudioEngine.
 /// Outputs mono Float32 PCM at the requested sample rate.
 final class MicrophoneCapture: @unchecked Sendable {
-    var onBuffer: ((TimestampedBuffer) -> Void)?
+    var onBuffer: ((SourcedAudioBuffer) -> Void)?
 
     private let engine = AVAudioEngine()
     private let lock = NSLock()
     private var converter: AVAudioConverter?
     private var targetFormat: AVAudioFormat?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
+    private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
 
-    func startCapture(sampleRate: Double = 48000) throws {
+    func startCapture(sampleRate: Double = AudioConfig.sampleRate) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
 
         let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
@@ -73,14 +74,14 @@ final class MicrophoneCapture: @unchecked Sendable {
         }
 
         if let error {
-            print("Mic audio conversion error: \(error)")
+            logger.error("Mic audio conversion error: \(error.localizedDescription)")
             return
         }
         guard let channelData = outputBuffer.floatChannelData else { return }
 
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(outputBuffer.frameLength)))
 
-        onBuffer?(TimestampedBuffer(samples: samples, source: .microphone))
+        onBuffer?(SourcedAudioBuffer(samples: samples, source: .microphone))
     }
 }
 

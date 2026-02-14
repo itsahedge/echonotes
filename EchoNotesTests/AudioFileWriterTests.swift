@@ -11,8 +11,8 @@ struct AudioFileWriterTests {
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
 
-    func makeBuffer(samples: [Float], source: TimestampedBuffer.AudioSource) -> TimestampedBuffer {
-        TimestampedBuffer(samples: samples, source: source)
+    func makeBuffer(samples: [Float], source: SourcedAudioBuffer.AudioSource) -> SourcedAudioBuffer {
+        SourcedAudioBuffer(samples: samples, source: source)
     }
 
     @Test("Creates output file with audio data")

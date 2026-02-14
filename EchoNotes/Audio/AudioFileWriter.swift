@@ -1,7 +1,8 @@
 import AVFoundation
+import os
 
-/// A timestamped audio buffer from either system audio or microphone.
-struct TimestampedBuffer: Sendable {
+/// An audio buffer with its source (system audio or microphone).
+struct SourcedAudioBuffer: Sendable {
     let samples: [Float]
     let source: AudioSource
 
@@ -31,6 +32,7 @@ final class AudioFileWriter: @unchecked Sendable {
     private let sampleRate: Double
     private let format: AVAudioFormat
     private let lock = NSLock()
+    private let logger = Logger(subsystem: "com.echonotes", category: "AudioFileWriter")
 
     /// Maximum samples one source can buffer ahead of the other (10 seconds at sample rate).
     /// Prevents OOM if one source stops sending data.
@@ -44,7 +46,7 @@ final class AudioFileWriter: @unchecked Sendable {
     private var micOffset: Int = 0
     private var writeError: Error?
 
-    init(outputURL: URL, sampleRate: Double = 48000, channels: UInt32 = 2, onError: (@Sendable (Error) -> Void)? = nil) throws {
+    init(outputURL: URL, sampleRate: Double = AudioConfig.sampleRate, channels: UInt32 = 2, onError: (@Sendable (Error) -> Void)? = nil) throws {
         self.outputURL = outputURL
         self.sampleRate = sampleRate
         self.onError = onError
@@ -66,7 +68,7 @@ final class AudioFileWriter: @unchecked Sendable {
         self.file = try AVAudioFile(forWriting: outputURL, settings: settings)
     }
 
-    func writeSystemBuffer(_ buffer: TimestampedBuffer) {
+    func writeSystemBuffer(_ buffer: SourcedAudioBuffer) {
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
         systemSamples.append(contentsOf: buffer.samples)
@@ -74,7 +76,7 @@ final class AudioFileWriter: @unchecked Sendable {
         lock.unlock()
     }
 
-    func writeMicBuffer(_ buffer: TimestampedBuffer) {
+    func writeMicBuffer(_ buffer: SourcedAudioBuffer) {
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
         micSamples.append(contentsOf: buffer.samples)
@@ -89,6 +91,7 @@ final class AudioFileWriter: @unchecked Sendable {
 
         // Guard against unbounded buffer growth if one source stops sending data
         if sysAvailable > maxBufferLag || micAvailable > maxBufferLag {
+            logger.error("Buffer overflow: system=\(sysAvailable) mic=\(micAvailable) max=\(self.maxBufferLag)")
             writeError = WriterError.bufferOverflow
             onError?(WriterError.bufferOverflow)
             return

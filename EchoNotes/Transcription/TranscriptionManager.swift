@@ -7,6 +7,14 @@ enum TranscriptionMode: String, CaseIterable {
 }
 
 /// Orchestrates the full transcription pipeline: model check → download → transcribe → save.
+///
+/// **Role as coordinator:**
+/// While this might seem like an unnecessary layer, it serves as a clear boundary between
+/// recording (RecordingEngine) and transcription (WhisperEngine/StreamingTranscriber).
+/// It owns the transcription state (@Published properties), manages the lifecycle of both
+/// post-recording and live transcription modes, and provides a single interface for the UI.
+/// This separation keeps RecordingEngine focused on audio I/O and allows transcription
+/// logic to evolve independently.
 @MainActor
 final class TranscriptionManager: ObservableObject {
     @Published var isTranscribing = false

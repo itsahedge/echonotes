@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// The entire UI — start/stop button with duration, level meters, and transcription controls.
+/// The entire UI — coordinates state and delegates to specialized subviews.
+/// Recording controls, level meters, and transcript display are extracted into separate components.
 struct MenuBarView: View {
     @ObservedObject var recorder: RecordingEngine
     weak var delegate: AppDelegate?
@@ -31,7 +32,7 @@ struct MenuBarView: View {
             } else if tm.isTranscribing || tm.isDownloadingModel {
                 transcribingView
             } else if let transcript = tm.transcript {
-                transcriptResultView(transcript)
+                TranscriptDisplayView(transcript: transcript, onReset: { tm.reset() })
             } else if recorder.lastRecordingURL != nil {
                 readyToTranscribeView
             } else {
@@ -48,7 +49,7 @@ struct MenuBarView: View {
             }
 
             // Primary action button
-            primaryButton
+            RecordingControlsView(recorder: recorder, delegate: delegate)
 
             // Quit button
             HStack {
@@ -76,8 +77,8 @@ struct MenuBarView: View {
                 .foregroundStyle(.primary)
 
             HStack(spacing: 16) {
-                levelMeter(label: "System", level: recorder.systemLevel)
-                levelMeter(label: "Mic", level: recorder.micLevel)
+                LevelMeterView(label: "System", level: recorder.systemLevel)
+                LevelMeterView(label: "Mic", level: recorder.micLevel)
             }
 
             // Live transcript display
@@ -224,89 +225,7 @@ struct MenuBarView: View {
         .frame(maxHeight: .infinity)
     }
 
-    private func transcriptResultView(_ transcript: Transcript) -> some View {
-        VStack(spacing: 8) {
-            ScrollView {
-                Text(transcript.toTimestampedText())
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-            }
-            .frame(maxHeight: .infinity)
-
-            HStack(spacing: 8) {
-                Button(action: {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
-                }) {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .font(.caption)
-                }
-
-                Button(action: {
-                    let txtURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("txt")
-                    NSWorkspace.shared.selectFile(txtURL.path, inFileViewerRootedAtPath: txtURL.deletingLastPathComponent().path)
-                }) {
-                    Label("Open File", systemImage: "doc.text")
-                        .font(.caption)
-                }
-
-                Spacer()
-
-                Button(action: { tm.reset() }) {
-                    Label("New", systemImage: "arrow.counterclockwise")
-                        .font(.caption)
-                }
-            }
-        }
-    }
-
-    // MARK: - Primary Button
-
-    private var primaryButton: some View {
-        Group {
-            if recorder.isRecording || recorder.lastRecordingURL == nil && !tm.isTranscribing && tm.transcript == nil {
-                Button(action: {
-                    Task {
-                        if recorder.isRecording {
-                            await recorder.stopRecording()
-                        } else {
-                            await recorder.startRecording()
-                        }
-                        delegate?.updateStatusIcon(isRecording: recorder.isRecording)
-                    }
-                }) {
-                    HStack {
-                        Image(systemName: recorder.isRecording ? "stop.fill" : "record.circle")
-                        Text(recorder.isRecording ? "Stop Recording" : "Start Recording")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(recorder.isRecording ? .red : .accentColor)
-            }
-        }
-    }
-
     // MARK: - Helpers
-
-    private func levelMeter(label: String, level: Float) -> some View {
-        VStack(spacing: 4) {
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.secondary.opacity(0.2))
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(level > 0.5 ? Color.orange : Color.green)
-                        .frame(width: geo.size.width * CGFloat(min(level * 4, 1.0)))
-                        .animation(.linear(duration: 0.1), value: level)
-                }
-            }
-            .frame(height: 8)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-    }
 
     private func formatDuration(_ t: TimeInterval) -> String {
         let h = Int(t) / 3600
