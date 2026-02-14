@@ -86,11 +86,19 @@ final class ModelManager: ObservableObject {
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
         
-        progressMonitorTask = Task { @MainActor in
+        progressMonitorTask = Task {
             while !Task.isCancelled {
-                let currentSize = directorySize(at: modelDir)
+                // Run disk I/O on background thread
+                let currentSize = await Task.detached {
+                    self.directorySize(at: modelDir)
+                }.value
+                
                 let progress = min(0.99, Double(currentSize) / Double(expectedBytes))
-                self.downloadProgress = progress
+                
+                // Only hop to MainActor to update @Published property
+                await MainActor.run {
+                    self.downloadProgress = progress
+                }
                 
                 try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
             }
