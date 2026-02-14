@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import AppKit
 import AVFoundation
 import Combine
@@ -11,6 +12,10 @@ final class RecordingEngine: ObservableObject {
     @Published var micLevel: Float = 0
     @Published var systemLevel: Float = 0
     @Published var errorMessage: String?
+    @Published var lastRecordingURL: URL?
+    @AppStorage("autoTranscribe") var autoTranscribe = false
+
+    let transcriptionManager = TranscriptionManager()
 
     private let systemCapture = SystemAudioCapture()
     private let micCapture = MicrophoneCapture()
@@ -101,9 +106,16 @@ final class RecordingEngine: ObservableObject {
         systemLevel = 0
 
         if let url {
+            lastRecordingURL = url
+            transcriptionManager.reset()
             print("Recording saved: \(url.path)")
             // Reveal in Finder
             NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
+
+            // Auto-transcribe if enabled
+            if autoTranscribe {
+                Task { await transcriptionManager.transcribe(audioURL: url) }
+            }
         }
     }
 

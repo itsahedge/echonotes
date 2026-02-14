@@ -10,13 +10,34 @@ let package = Package(
     products: [
         .executable(name: "EchoNotes", targets: ["EchoNotes"])
     ],
-    dependencies: [
-        // No external dependencies for MVP
-    ],
+    dependencies: [],
     targets: [
+        .target(
+            name: "CWhisper",
+            path: "Sources/CWhisper",
+            sources: [
+                "ggml.c",
+                "ggml-alloc.c",
+                "ggml-backend.c",
+                "ggml-quants.c",
+                "whisper.cpp"
+            ],
+            publicHeadersPath: "include",
+            cSettings: [
+                .define("GGML_USE_ACCELERATE"),
+                .headerSearchPath("include")
+            ],
+            cxxSettings: [
+                .define("GGML_USE_ACCELERATE"),
+                .headerSearchPath("include")
+            ],
+            linkerSettings: [
+                .linkedFramework("Accelerate")
+            ]
+        ),
         .executableTarget(
             name: "EchoNotes",
-            dependencies: [],
+            dependencies: ["CWhisper"],
             path: "EchoNotes"
         ),
         .testTarget(
@@ -24,5 +45,6 @@ let package = Package(
             dependencies: ["EchoNotes"],
             path: "EchoNotesTests"
         )
-    ]
+    ],
+    cxxLanguageStandard: .cxx11
 )
