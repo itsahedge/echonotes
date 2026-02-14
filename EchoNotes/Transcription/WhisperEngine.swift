@@ -61,6 +61,29 @@ final class WhisperEngine: @unchecked Sendable {
         }.value
     }
 
+    /// Transcribe raw 16kHz mono Float32 PCM samples directly.
+    /// Used by StreamingTranscriber for live transcription (samples are already resampled).
+    func transcribeSamples(
+        _ samples: [Float],
+        progressCallback: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> [TranscriptSegment] {
+        guard let context else { throw WhisperError.modelNotLoaded }
+
+        let acquired = isRunning.withLock { running -> Bool in
+            if running { return false }
+            running = true
+            return true
+        }
+        guard acquired else { throw WhisperError.inferenceFailed }
+
+        defer { isRunning.withLock { $0 = false } }
+
+        let ctx = context
+        return try await Task.detached(priority: .userInitiated) {
+            try Self.runInference(context: ctx, samples: samples, progressCallback: progressCallback)
+        }.value
+    }
+
     /// Convert an M4A file to 16kHz mono Float32 PCM, extracting the left channel.
     /// Processes audio in chunks to avoid holding the entire file in memory.
     private func convertAudioToWhisperFormat(audioURL: URL) async throws -> [Float] {

@@ -1,5 +1,11 @@
 import Foundation
 
+/// How transcription should be performed.
+enum TranscriptionMode: String, CaseIterable {
+    case postRecording = "After Recording"
+    case live = "Live"
+}
+
 /// Orchestrates the full transcription pipeline: model check → download → convert → transcribe → save.
 @MainActor
 final class TranscriptionManager: ObservableObject {
@@ -9,12 +15,43 @@ final class TranscriptionManager: ObservableObject {
     @Published var error: String?
 
     let modelManager = ModelManager()
+    let streamingTranscriber = StreamingTranscriber()
     private var whisperEngine: WhisperEngine?
     private var loadedModel: WhisperModel?
     private var transcriptionTask: Task<Void, Never>?
 
     /// The model to use for transcription.
     var selectedModel: WhisperModel = .baseEn
+
+    /// Prepare the streaming transcriber with a loaded engine (call before recording starts).
+    func prepareForLiveTranscription() async throws {
+        let modelPath = try await modelManager.ensureModel(selectedModel)
+        if whisperEngine == nil || loadedModel != selectedModel {
+            whisperEngine = try WhisperEngine(modelPath: modelPath)
+            loadedModel = selectedModel
+        }
+        streamingTranscriber.prepare(engine: whisperEngine!)
+    }
+
+    /// Finalize live transcription — flush remaining audio and build transcript.
+    func finalizeLiveTranscription(recordingURL: URL) async {
+        await streamingTranscriber.flush()
+
+        let segments = streamingTranscriber.segments
+        guard !segments.isEmpty else { return }
+
+        let result = Transcript(
+            segments: segments,
+            recordingURL: recordingURL,
+            createdAt: Date()
+        )
+        do {
+            try result.save()
+        } catch {
+            self.error = "Failed to save transcript: \(error.localizedDescription)"
+        }
+        transcript = result
+    }
 
     /// Whether the model is currently being downloaded.
     var isDownloadingModel: Bool { modelManager.isDownloading }
