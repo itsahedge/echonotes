@@ -54,7 +54,15 @@ swift build
 .build/debug/EchoNotes
 ```
 
-### Build a standalone app
+### Build as macOS App
+
+```bash
+./scripts/build-app.sh
+```
+
+This creates `EchoNotes.app` in the project root. Drag it to `/Applications` to install.
+
+### Build a standalone binary
 
 ```bash
 swift build -c release
