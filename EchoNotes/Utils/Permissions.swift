@@ -6,7 +6,7 @@ import ScreenCaptureKit
 /// **Note:** "Screen Recording" permission is required to use ScreenCaptureKit's audio API.
 /// We use ScreenCaptureKit in AUDIO-ONLY mode — no video, screen, or visual data is captured.
 struct PermissionChecker {
-    func requestMicrophonePermission() async -> Bool {
+    private static func requestMicrophonePermission() async -> Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         switch status {
         case .authorized: return true
@@ -15,21 +15,15 @@ struct PermissionChecker {
         }
     }
 
-    func requestScreenRecordingPermission() async -> Bool {
+    private static func requestScreenRecordingPermission() async -> Bool {
         do {
             _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
             return true
         } catch { return false }
     }
-
-    func ensureAllPermissions() async -> Bool {
-        let mic = await requestMicrophonePermission()
-        let screen = await requestScreenRecordingPermission()
-        return mic && screen
-    }
     
     /// Check permissions individually and return a specific error message if any are missing.
-    func checkPermissionsWithMessage() async -> String? {
+    static func checkPermissionsWithMessage() async -> String? {
         let mic = await requestMicrophonePermission()
         let screen = await requestScreenRecordingPermission()
         
