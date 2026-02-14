@@ -119,15 +119,6 @@ final class StreamingTranscriber: ObservableObject {
         isProcessing = true
 
         processingTask = Task {
-            defer {
-                isProcessing = false
-                // Process any queued samples that arrived during inference
-                if !queuedSamples.isEmpty {
-                    let queued = queuedSamples
-                    queuedSamples = []
-                    processChunk(queued)
-                }
-            }
             do {
                 let resampled = try resample(chunk)
                 guard let engine = whisperEngine else { return }
@@ -143,6 +134,37 @@ final class StreamingTranscriber: ObservableObject {
             } catch {
                 self.error = "Live transcription error: \(error.localizedDescription)"
             }
+
+            isProcessing = false
+            
+            // Drain queued samples with while-loop instead of recursion
+            while !queuedSamples.isEmpty {
+                let queued = queuedSamples
+                queuedSamples = []
+                
+                let queuedTimeOffset = Double(totalSamplesProcessed) / sampleRate
+                totalSamplesProcessed += queued.count
+                isProcessing = true
+                
+                do {
+                    let resampled = try resample(queued)
+                    guard let engine = whisperEngine else { break }
+                    let newSegments = try await engine.transcribeSamples(resampled)
+
+                    segments.append(contentsOf: newSegments.map {
+                        TranscriptSegment(
+                            startTime: $0.startTime + queuedTimeOffset,
+                            endTime: $0.endTime + queuedTimeOffset,
+                            text: $0.text
+                        )
+                    })
+                } catch {
+                    self.error = "Live transcription error: \(error.localizedDescription)"
+                    break
+                }
+                
+                isProcessing = false
+            }
         }
     }
 
@@ -150,7 +172,8 @@ final class StreamingTranscriber: ObservableObject {
     nonisolated private func resample(_ samples: [Float]) throws -> [Float] {
         guard !samples.isEmpty else { return [] }
         guard let converter = resampler else {
-            throw WhisperError.audioConversionFailed
+            throw NSError(domain: "com.echonotes.whisper", code: 1, 
+                         userInfo: [NSLocalizedDescriptionKey: "Failed to convert audio format."])
         }
 
         let inBuf = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: AVAudioFrameCount(samples.count))!

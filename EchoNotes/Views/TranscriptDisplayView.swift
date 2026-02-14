@@ -26,7 +26,9 @@ struct TranscriptDisplayView: View {
 
                 Button(action: {
                     let txtURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("txt")
-                    NSWorkspace.shared.selectFile(txtURL.path, inFileViewerRootedAtPath: txtURL.deletingLastPathComponent().path)
+                    if FileManager.default.fileExists(atPath: txtURL.path) {
+                        NSWorkspace.shared.selectFile(txtURL.path, inFileViewerRootedAtPath: txtURL.deletingLastPathComponent().path)
+                    }
                 }) {
                     Label("Open File", systemImage: "doc.text")
                         .font(.caption)

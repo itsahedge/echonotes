@@ -47,13 +47,3 @@ final class WhisperEngine: @unchecked Sendable {
         }}
     }
 }
-
-enum WhisperError: LocalizedError {
-    case audioConversionFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .audioConversionFailed: return "Failed to convert audio format."
-        }
-    }
-}
