@@ -29,7 +29,7 @@ struct MenuBarView: View {
 
             if recorder.isRecording {
                 recordingView
-            } else if tm.isTranscribing || tm.isDownloadingModel {
+            } else if tm.isTranscribing || tm.modelManager.isDownloading {
                 transcribingView
             } else if let transcript = tm.transcript {
                 TranscriptDisplayView(transcript: transcript, onReset: { tm.reset() })
@@ -111,7 +111,9 @@ struct MenuBarView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(tm.streamingTranscriber.segments.enumerated()), id: \.offset) { idx, segment in
+                            // Only show the last 50 segments for performance
+                            // Full array is preserved in StreamingTranscriber.segments for final transcript
+                            ForEach(Array(recentSegments.enumerated()), id: \.offset) { idx, segment in
                                 Text(segment.text.trimmingCharacters(in: .whitespaces))
                                     .font(.caption)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -122,12 +124,23 @@ struct MenuBarView: View {
                     .frame(maxHeight: 120)
                     .onChange(of: tm.streamingTranscriber.segments.count) { _, newCount in
                         if newCount > 0 {
-                            proxy.scrollTo(newCount - 1, anchor: .bottom)
+                            proxy.scrollTo(min(recentSegments.count - 1, 49), anchor: .bottom)
                         }
                     }
                 }
             }
         }
+    }
+    
+    /// Returns the last 50 segments for live display to avoid SwiftUI performance issues
+    /// with long recordings. Full array is preserved for the final transcript.
+    private var recentSegments: [TranscriptSegment] {
+        let segments = tm.streamingTranscriber.segments
+        let maxVisible = 50
+        if segments.count > maxVisible {
+            return Array(segments.suffix(maxVisible))
+        }
+        return segments
     }
 
     private var idleView: some View {
@@ -195,12 +208,12 @@ struct MenuBarView: View {
 
     private var transcribingView: some View {
         VStack(spacing: 12) {
-            if tm.isDownloadingModel {
+            if tm.modelManager.isDownloading {
                 Text("Downloading model…")
                     .font(.title3)
-                ProgressView(value: tm.downloadProgress)
+                ProgressView(value: tm.modelManager.downloadProgress)
                     .progressViewStyle(.linear)
-                Text("\(Int(tm.downloadProgress * 100))%")
+                Text("\(Int(tm.modelManager.downloadProgress * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

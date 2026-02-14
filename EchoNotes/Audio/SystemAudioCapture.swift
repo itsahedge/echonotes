@@ -53,14 +53,19 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
         // Try to start with 2x2, fallback to 16x16 if it fails
         do {
             try await stream.startCapture()
+            self.stream = stream
         } catch {
             logger.warning("Failed to start capture with 2x2 config, retrying with 16x16: \(error.localizedDescription)")
             config.width = 16
             config.height = 16
-            try await stream.startCapture()
+            
+            // Create a NEW stream with updated config (old stream may be in bad state)
+            let fallbackStream = SCStream(filter: filter, configuration: config, delegate: self)
+            try fallbackStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
+            try await fallbackStream.startCapture()
+            self.stream = fallbackStream
         }
 
-        self.stream = stream
         _isCapturing.withLock { $0 = true }
     }
 
