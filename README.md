@@ -87,12 +87,16 @@ EchoNotes/
 ├── Models/
 │   └── Transcript.swift            # Segment model + export (.txt, .json)
 ├── Views/
-│   └── MenuBarView.swift           # Full UI
+│   ├── MenuBarView.swift           # Main popover UI
+│   ├── RecordingControlsView.swift # Start/stop button
+│   ├── TranscriptDisplayView.swift # Completed transcript display
+│   └── LevelMeterView.swift        # Audio level visualization
 └── Utils/
+    ├── Constants.swift             # Audio configuration
     └── Permissions.swift           # Mic + screen recording checks
 ```
 
-~1,350 lines of Swift. One dependency: [WhisperKit](https://github.com/argmaxinc/WhisperKit).
+~1,770 lines of Swift + ~400 lines of tests. One dependency: [WhisperKit](https://github.com/argmaxinc/WhisperKit).
 
 ## Tech Stack
 
