@@ -39,6 +39,9 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
         config.excludesCurrentProcessAudio = true
 
         // Set minimal video config (we only register for .audio output, so no video data is processed)
+        // ScreenCaptureKit requires a video configuration even for audio-only capture.
+        // We use the smallest possible dimensions (2x2) to minimize overhead.
+        // If 2x2 fails on some systems, we fallback to 16x16.
         config.width = 2
         config.height = 2
         config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
@@ -46,7 +49,16 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
-        try await stream.startCapture()
+        
+        // Try to start with 2x2, fallback to 16x16 if it fails
+        do {
+            try await stream.startCapture()
+        } catch {
+            logger.warning("Failed to start capture with 2x2 config, retrying with 16x16: \(error.localizedDescription)")
+            config.width = 16
+            config.height = 16
+            try await stream.startCapture()
+        }
 
         self.stream = stream
         _isCapturing.withLock { $0 = true }
@@ -69,15 +81,13 @@ extension SystemAudioCapture: SCStreamOutput {
         guard let dataBuffer = sampleBuffer.dataBuffer else { return }
 
         let length = dataBuffer.dataLength
+        let floatCount = length / MemoryLayout<Float>.size
 
         do {
-            var rawData = Data(count: length)
-            try rawData.withUnsafeMutableBytes { ptr in
-                try dataBuffer.copyDataBytes(to: ptr)
-            }
-            let floatCount = length / MemoryLayout<Float>.size
-            let samples = rawData.withUnsafeBytes { ptr in
-                Array(ptr.bindMemory(to: Float.self).prefix(floatCount))
+            // Single-copy approach: access buffer bytes directly without intermediate Data allocation
+            let samples = try dataBuffer.withContiguousStorage { ptr in
+                Array(UnsafeBufferPointer(start: ptr.baseAddress?.assumingMemoryBound(to: Float.self),
+                                          count: floatCount))
             }
             onBuffer?(SourcedAudioBuffer(samples: samples, source: .system))
         } catch {

@@ -5,6 +5,7 @@ import os
 /// Outputs mono Float32 PCM at the requested sample rate.
 final class MicrophoneCapture: @unchecked Sendable {
     var onBuffer: ((SourcedAudioBuffer) -> Void)?
+    var onError: ((Error) -> Void)?
 
     private let engine = AVAudioEngine()
     private let lock = NSLock()
@@ -12,6 +13,7 @@ final class MicrophoneCapture: @unchecked Sendable {
     private var targetFormat: AVAudioFormat?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
     private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
+    private var configObserver: NSObjectProtocol?
 
     func startCapture(sampleRate: Double = AudioConfig.sampleRate) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
@@ -34,6 +36,22 @@ final class MicrophoneCapture: @unchecked Sendable {
             self?.processBuffer(buffer)
         }
 
+        // Monitor for configuration changes (device disconnect, etc.)
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            // Check if engine stopped unexpectedly
+            if !self.engine.isRunning && self._isCapturing.withLock({ $0 }) {
+                let error = MicrophoneError.deviceDisconnected
+                self.logger.error("Microphone configuration changed, engine stopped: \(error.localizedDescription)")
+                self._isCapturing.withLock { $0 = false }
+                self.onError?(error)
+            }
+        }
+
         engine.prepare()
         try engine.start()
         _isCapturing.withLock { $0 = true }
@@ -41,6 +59,12 @@ final class MicrophoneCapture: @unchecked Sendable {
 
     func stopCapture() {
         guard _isCapturing.withLock({ $0 }) else { return }
+        
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configObserver = nil
+        }
+        
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
 
@@ -86,11 +110,12 @@ final class MicrophoneCapture: @unchecked Sendable {
 }
 
 enum MicrophoneError: LocalizedError {
-    case noInputDevice, converterCreationFailed
+    case noInputDevice, converterCreationFailed, deviceDisconnected
     var errorDescription: String? {
         switch self {
         case .noInputDevice: return "No microphone found."
         case .converterCreationFailed: return "Failed to create audio converter."
+        case .deviceDisconnected: return "Microphone disconnected during recording."
         }
     }
 }

@@ -40,6 +40,8 @@ final class RecordingEngine: ObservableObject {
     private var audioWriter: AudioFileWriter?
     private var durationTimer: Timer?
     private var recordingStartTime: Date?
+    private var lastSystemLevelUpdate: Date = .distantPast
+    private var lastMicLevelUpdate: Date = .distantPast
 
     /// Save location for recordings. Directory validation happens in startRecording().
     var saveDirectory: URL {
@@ -52,8 +54,7 @@ final class RecordingEngine: ObservableObject {
         errorMessage = nil
 
         // Check permissions
-        let permissions = PermissionChecker()
-        if let permissionError = await permissions.checkPermissionsWithMessage() {
+        if let permissionError = await PermissionChecker.checkPermissionsWithMessage() {
             errorMessage = permissionError
             return
         }
@@ -66,9 +67,11 @@ final class RecordingEngine: ObservableObject {
             return
         }
 
-        // Create output file
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
+        // Create output file with local timezone timestamp
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
+        formatter.timeZone = TimeZone.current
+        let timestamp = formatter.string(from: Date())
         let filename = "recording-\(timestamp).m4a"
         let fileURL = saveDirectory.appendingPathComponent(filename)
 
@@ -83,10 +86,17 @@ final class RecordingEngine: ObservableObject {
 
             audioWriter = writer
 
-            // Surface system audio capture errors to the UI
+            // Surface audio capture errors to the UI
             systemCapture.onError = { [weak self] error in
                 Task { @MainActor in
                     self?.errorMessage = "System audio error: \(error.localizedDescription)"
+                    await self?.stopRecording()
+                }
+            }
+
+            micCapture.onError = { [weak self] error in
+                Task { @MainActor in
+                    self?.errorMessage = "Microphone error: \(error.localizedDescription)"
                     await self?.stopRecording()
                 }
             }
@@ -104,25 +114,9 @@ final class RecordingEngine: ObservableObject {
                 }
             }
 
-            // Start captures with callbacks that feed the writer
-            systemCapture.onBuffer = { [weak self] buffer in
-                self?.audioWriter?.writeSystemBuffer(buffer)
-                // Feed system audio to streaming transcriber for live mode
-                if isLive {
-                    self?.transcriptionManager.streamingTranscriber.feedSamples(buffer.samples)
-                }
-                Task { @MainActor in
-                    self?.systemLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
-                }
-            }
-
-            micCapture.onBuffer = { [weak self] buffer in
-                self?.audioWriter?.writeMicBuffer(buffer)
-                Task { @MainActor in
-                    self?.micLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
-                }
-            }
-
+            // Start both captures BEFORE setting onBuffer callbacks
+            // This prevents partial failure states where system buffers feed a writer
+            // that's about to be finalized
             try await systemCapture.startCapture(sampleRate: AudioConfig.sampleRate)
             do {
                 try micCapture.startCapture(sampleRate: AudioConfig.sampleRate)
@@ -130,6 +124,37 @@ final class RecordingEngine: ObservableObject {
                 // System capture already started — must stop it before bailing
                 await systemCapture.stopCapture()
                 throw error
+            }
+
+            // Now that both captures are running, set up buffer callbacks
+            systemCapture.onBuffer = { [weak self] buffer in
+                self?.audioWriter?.writeSystemBuffer(buffer)
+                // Feed system audio to streaming transcriber for live mode
+                if isLive {
+                    self?.transcriptionManager.streamingTranscriber.feedSamples(buffer.samples)
+                }
+                // Throttle level meter updates to ~15fps (66ms minimum interval)
+                Task { @MainActor in
+                    guard let self else { return }
+                    let now = Date()
+                    if now.timeIntervalSince(self.lastSystemLevelUpdate) > 0.066 {
+                        self.systemLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
+                        self.lastSystemLevelUpdate = now
+                    }
+                }
+            }
+
+            micCapture.onBuffer = { [weak self] buffer in
+                self?.audioWriter?.writeMicBuffer(buffer)
+                // Throttle level meter updates to ~15fps (66ms minimum interval)
+                Task { @MainActor in
+                    guard let self else { return }
+                    let now = Date()
+                    if now.timeIntervalSince(self.lastMicLevelUpdate) > 0.066 {
+                        self.micLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
+                        self.lastMicLevelUpdate = now
+                    }
+                }
             }
 
             recordingStartTime = Date()

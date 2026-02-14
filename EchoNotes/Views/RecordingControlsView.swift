@@ -33,8 +33,8 @@ struct RecordingControlsView: View {
     
     private var shouldShowPrimaryButton: Bool {
         recorder.isRecording || 
-        recorder.lastRecordingURL == nil && 
-        !recorder.transcriptionManager.isTranscribing && 
-        recorder.transcriptionManager.transcript == nil
+        (recorder.lastRecordingURL == nil && 
+         !recorder.transcriptionManager.isTranscribing && 
+         recorder.transcriptionManager.transcript == nil)
     }
 }
