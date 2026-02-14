@@ -2,7 +2,6 @@ import Foundation
 import SwiftUI
 import AppKit
 import AVFoundation
-import Combine
 
 /// Central recording engine — coordinates system audio + mic capture and writes to file.
 @MainActor

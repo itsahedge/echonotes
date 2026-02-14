@@ -1,4 +1,5 @@
-import AVFoundation
+@preconcurrency import AVFoundation
+import os
 
 /// Captures microphone audio using AVAudioEngine.
 /// Outputs mono Float32 PCM at the requested sample rate.
@@ -8,10 +9,10 @@ final class MicrophoneCapture: @unchecked Sendable {
     private let engine = AVAudioEngine()
     private var converter: AVAudioConverter?
     private var targetFormat: AVAudioFormat!
-    private var isCapturing = false
+    private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
 
     func startCapture(sampleRate: Double = 48000) throws {
-        guard !isCapturing else { return }
+        guard _isCapturing.withLock({ !$0 }) else { return }
 
         targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
 
@@ -28,14 +29,14 @@ final class MicrophoneCapture: @unchecked Sendable {
 
         engine.prepare()
         try engine.start()
-        isCapturing = true
+        _isCapturing.withLock { $0 = true }
     }
 
     func stopCapture() {
-        guard isCapturing else { return }
+        guard _isCapturing.withLock({ $0 }) else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        isCapturing = false
+        _isCapturing.withLock { $0 = false }
     }
 
     private func processBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
