@@ -28,18 +28,11 @@ final class RecordingEngine: ObservableObject {
     private var durationTimer: Timer?
     private var recordingStartTime: Date?
 
-    /// Save location for recordings.
-    /// Created lazily on first access; directory creation errors surface via `errorMessage`.
-    lazy var saveDirectory: URL = {
+    /// Save location for recordings. Directory validation happens in startRecording().
+    var saveDirectory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let dir = docs.appendingPathComponent("EchoNotes", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            errorMessage = "Failed to create recordings directory: \(error.localizedDescription)"
-        }
-        return dir
-    }()
+        return docs.appendingPathComponent("EchoNotes", isDirectory: true)
+    }
 
     func startRecording() async {
         guard !isRecording else { return }
@@ -47,8 +40,16 @@ final class RecordingEngine: ObservableObject {
 
         // Check permissions
         let permissions = PermissionChecker()
-        guard await permissions.ensureAllPermissions() else {
-            errorMessage = "Microphone and Screen Recording permissions are required."
+        if let permissionError = await permissions.checkPermissionsWithMessage() {
+            errorMessage = permissionError
+            return
+        }
+
+        // Ensure recordings directory exists
+        do {
+            try FileManager.default.createDirectory(at: saveDirectory, withIntermediateDirectories: true)
+        } catch {
+            errorMessage = "Failed to create recordings directory: \(error.localizedDescription)"
             return
         }
 
