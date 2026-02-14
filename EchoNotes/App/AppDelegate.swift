@@ -18,10 +18,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Pre-download Whisper model on first launch if not already cached
         Task {
-            let manager = recorder.transcriptionManager.modelManager
-            let model = recorder.transcriptionManager.selectedModel
-            if !ModelManager.modelExists(model) {
-                _ = try? await manager.ensureEngine(for: model)
+            if !ModelManager.modelLikelyCached() {
+                _ = try? await recorder.transcriptionManager.modelManager.ensureEngine(
+                    for: recorder.transcriptionManager.selectedModel
+                )
             }
         }
     }
