@@ -7,24 +7,30 @@ final class MicrophoneCapture: @unchecked Sendable {
     var onBuffer: ((TimestampedBuffer) -> Void)?
 
     private let engine = AVAudioEngine()
+    private let lock = NSLock()
     private var converter: AVAudioConverter?
-    private var targetFormat: AVAudioFormat!
+    private var targetFormat: AVAudioFormat?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
 
     func startCapture(sampleRate: Double = 48000) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
 
-        targetFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
+        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0 else { throw MicrophoneError.noInputDevice }
 
-        converter = AVAudioConverter(from: inputFormat, to: targetFormat)
-        guard converter != nil else { throw MicrophoneError.converterCreationFailed }
+        let conv = AVAudioConverter(from: inputFormat, to: fmt)
+        guard conv != nil else { throw MicrophoneError.converterCreationFailed }
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, time in
-            self?.processBuffer(buffer, time: time)
+        lock.lock()
+        targetFormat = fmt
+        converter = conv
+        lock.unlock()
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            self?.processBuffer(buffer)
         }
 
         engine.prepare()
@@ -36,11 +42,19 @@ final class MicrophoneCapture: @unchecked Sendable {
         guard _isCapturing.withLock({ $0 }) else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+
+        lock.lock()
+        converter = nil
+        targetFormat = nil
+        lock.unlock()
+
         _isCapturing.withLock { $0 = false }
     }
 
-    private func processBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        guard let converter, let targetFormat else { return }
+    private func processBuffer(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        guard let converter, let targetFormat else { lock.unlock(); return }
+        lock.unlock()
 
         let ratio = targetFormat.sampleRate / buffer.format.sampleRate
         let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)

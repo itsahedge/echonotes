@@ -53,7 +53,10 @@ struct MenuBarView: View {
             // Quit button
             HStack {
                 Spacer()
-                Button("Quit") { NSApp.terminate(nil) }
+                Button("Quit") {
+                    delegate?.removeEventMonitor()
+                    NSApp.terminate(nil)
+                }
                     .buttonStyle(.plain)
                     .font(.caption)
                     .foregroundStyle(.secondary)
