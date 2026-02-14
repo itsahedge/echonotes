@@ -161,6 +161,7 @@ final class RecordingEngine: ObservableObject {
         audioWriter?.finalize()
 
         let url = audioWriter?.outputURL
+        let recordedDuration = duration  // Capture before reset
         cleanup()
 
         isRecording = false
@@ -170,7 +171,7 @@ final class RecordingEngine: ObservableObject {
 
         if let url {
             lastRecordingURL = url
-            logger.info("Recording stopped: \(url.lastPathComponent), duration: \(String(format: "%.1f", self.duration))s")
+            logger.info("Recording stopped: \(url.lastPathComponent), duration: \(String(format: "%.1f", recordedDuration))s")
 
             if transcriptionMode == .live {
                 // Finalize live transcription — flush remaining chunks
