@@ -63,10 +63,9 @@ final class ModelManager: ObservableObject {
         }
     }
 
-    /// Check if a model is likely cached (WhisperKit manages its own cache).
-    nonisolated static func modelExists(_ model: WhisperModel) -> Bool {
-        // WhisperKit handles caching internally — this is a best-effort check
-        // by looking for the model folder in the default cache location
+    /// Check if WhisperKit models are likely cached.
+    /// Best-effort — WhisperKit manages its own cache; we just check if the directory exists.
+    nonisolated static func modelLikelyCached() -> Bool {
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
         return FileManager.default.fileExists(atPath: modelDir.path)

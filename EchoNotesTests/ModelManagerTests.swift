@@ -18,9 +18,9 @@ struct ModelManagerTests {
         #expect(Set(rawValues).count == rawValues.count)
     }
 
-    @Test("Model existence check doesn't crash")
-    func modelExistsCheck() {
+    @Test("Cache check doesn't crash")
+    func cacheCheck() {
         // Just ensure it doesn't crash — result is non-deterministic
-        _ = ModelManager.modelExists(.tiny)
+        _ = ModelManager.modelLikelyCached()
     }
 }
