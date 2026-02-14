@@ -13,6 +13,10 @@ import Foundation
 @MainActor
 final class StreamingTranscriber: ObservableObject {
     @Published var segments: [TranscriptSegment] = []
+    /// Older segments flushed from live memory to prevent unbounded growth.
+    private(set) var flushedSegments: [TranscriptSegment] = []
+    /// Maximum segments to keep in memory during live mode.
+    private let maxLiveSegments = 500
     @Published var isProcessing = false
     @Published var error: String?
 
@@ -81,6 +85,7 @@ final class StreamingTranscriber: ObservableObject {
         // Clear queued samples — these are intentionally dropped on reset.
         // If you need to preserve in-flight audio, call flush() before reset().
         queuedSamples = []
+        flushedSegments = []
 
         sampleLock.lock()
         incomingSamples = []
@@ -130,6 +135,7 @@ final class StreamingTranscriber: ObservableObject {
                         text: $0.text
                     )
                 })
+                capSegmentsIfNeeded()
             } catch {
                 self.error = "Live transcription error: \(error.localizedDescription)"
             }
@@ -139,6 +145,7 @@ final class StreamingTranscriber: ObservableObject {
             // Drain queued samples with while-loop instead of recursion
             // Use defer to ensure isProcessing is always reset, even on error/break
             while !queuedSamples.isEmpty {
+                guard !Task.isCancelled else { break }
                 let queued = queuedSamples
                 queuedSamples = []
                 
@@ -160,6 +167,7 @@ final class StreamingTranscriber: ObservableObject {
                             text: $0.text
                         )
                     })
+                    capSegmentsIfNeeded()
                 } catch {
                     self.error = "Live transcription error: \(error.localizedDescription)"
                     break
@@ -168,10 +176,20 @@ final class StreamingTranscriber: ObservableObject {
         }
     }
 
-    /// Resample 48kHz → 16kHz mono for Whisper using the reusable converter.
+    /// Flush older segments to `flushedSegments` when live memory exceeds the cap.
+    private func capSegmentsIfNeeded() {
+        if segments.count > maxLiveSegments {
+            let overflow = segments.count - maxLiveSegments
+            flushedSegments.append(contentsOf: segments.prefix(overflow))
+            segments.removeFirst(overflow)
+        }
+    }
+
+    /// Resample 48kHz → 16kHz mono for Whisper using a fresh converter per call.
+    /// A new AVAudioConverter is created each time to avoid state leakage between chunks.
     nonisolated private func resample(_ samples: [Float]) throws -> [Float] {
         guard !samples.isEmpty else { return [] }
-        guard let converter = resampler else {
+        guard let converter = AVAudioConverter(from: srcFormat, to: dstFormat) else {
             throw NSError(domain: "com.echonotes.whisper", code: 1, 
                          userInfo: [NSLocalizedDescriptionKey: "Failed to convert audio format."])
         }
