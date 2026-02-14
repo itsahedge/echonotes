@@ -113,13 +113,20 @@ final class AudioFileWriter: @unchecked Sendable {
         systemOffset += count
         micOffset += count
 
-        // Compact when fully consumed to free memory
+        // Compact when fully consumed or when offset exceeds 50% to prevent unbounded growth
         if systemOffset == systemSamples.count {
             systemSamples.removeAll(keepingCapacity: true)
             systemOffset = 0
+        } else if systemOffset > systemSamples.count / 2 {
+            systemSamples.removeFirst(systemOffset)
+            systemOffset = 0
         }
+        
         if micOffset == micSamples.count {
             micSamples.removeAll(keepingCapacity: true)
+            micOffset = 0
+        } else if micOffset > micSamples.count / 2 {
+            micSamples.removeFirst(micOffset)
             micOffset = 0
         }
 
@@ -132,6 +139,12 @@ final class AudioFileWriter: @unchecked Sendable {
     }
 
     /// Flush any remaining samples and close the file.
+    ///
+    /// **Known limitation:** There is a race window where capture callbacks may still be
+    /// in-flight when finalize is called (after stopCapture but before callbacks complete).
+    /// Samples arriving during this window may be dropped. A proper fix would require
+    /// synchronization at the capture layer to ensure all callbacks have finished before
+    /// finalize is invoked.
     func finalize() {
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
