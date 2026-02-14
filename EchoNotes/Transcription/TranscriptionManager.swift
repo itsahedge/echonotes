@@ -6,7 +6,7 @@ enum TranscriptionMode: String, CaseIterable {
     case live = "Live"
 }
 
-/// Orchestrates the full transcription pipeline: model check → download → convert → transcribe → save.
+/// Orchestrates the full transcription pipeline: model check → download → transcribe → save.
 @MainActor
 final class TranscriptionManager: ObservableObject {
     @Published var isTranscribing = false
@@ -17,20 +17,22 @@ final class TranscriptionManager: ObservableObject {
     let modelManager = ModelManager()
     let streamingTranscriber = StreamingTranscriber()
     private var whisperEngine: WhisperEngine?
-    private var loadedModel: WhisperModel?
     private var transcriptionTask: Task<Void, Never>?
 
     /// The model to use for transcription.
-    var selectedModel: WhisperModel = .baseEn
+    var selectedModel: WhisperModel = .base
 
-    /// Prepare the streaming transcriber with a loaded engine (call before recording starts).
+    /// Whether the model is currently being downloaded.
+    var isDownloadingModel: Bool { modelManager.isDownloading }
+
+    /// Model download progress (0.0–1.0).
+    var downloadProgress: Double { modelManager.downloadProgress }
+
+    /// Prepare the streaming transcriber with a loaded engine.
     func prepareForLiveTranscription() async throws {
-        let modelPath = try await modelManager.ensureModel(selectedModel)
-        if whisperEngine == nil || loadedModel != selectedModel {
-            whisperEngine = try WhisperEngine(modelPath: modelPath)
-            loadedModel = selectedModel
-        }
-        streamingTranscriber.prepare(engine: whisperEngine!)
+        let engine = try await modelManager.ensureEngine(for: selectedModel)
+        whisperEngine = engine
+        streamingTranscriber.prepare(engine: engine)
     }
 
     /// Finalize live transcription — flush remaining audio and build transcript.
@@ -53,12 +55,6 @@ final class TranscriptionManager: ObservableObject {
         transcript = result
     }
 
-    /// Whether the model is currently being downloaded.
-    var isDownloadingModel: Bool { modelManager.isDownloading }
-
-    /// Model download progress (0.0–1.0).
-    var downloadProgress: Double { modelManager.downloadProgress }
-
     /// Cancel a running transcription.
     func cancel() {
         transcriptionTask?.cancel()
@@ -69,7 +65,6 @@ final class TranscriptionManager: ObservableObject {
     }
 
     /// Transcribe an audio file end-to-end.
-    /// Ensures the model is available (downloading if needed), loads it, runs inference, and saves results.
     func transcribe(audioURL: URL) async {
         guard !isTranscribing else { return }
 
@@ -80,21 +75,12 @@ final class TranscriptionManager: ObservableObject {
 
         let task = Task {
             do {
-                // Step 1: Ensure model is downloaded
-                let modelPath = try await modelManager.ensureModel(selectedModel)
+                let engine = try await modelManager.ensureEngine(for: selectedModel)
+                whisperEngine = engine
 
                 try Task.checkCancellation()
 
-                // Step 2: Load engine if needed (or reload if model changed)
-                if whisperEngine == nil || loadedModel != selectedModel {
-                    whisperEngine = try WhisperEngine(modelPath: modelPath)
-                    loadedModel = selectedModel
-                }
-
-                try Task.checkCancellation()
-
-                // Step 3: Run transcription
-                let segments = try await whisperEngine!.transcribe(audioURL: audioURL) { [weak self] progress in
+                let segments = try await engine.transcribe(audioURL: audioURL) { [weak self] progress in
                     Task { @MainActor in
                         self?.progress = progress
                     }
@@ -102,14 +88,11 @@ final class TranscriptionManager: ObservableObject {
 
                 try Task.checkCancellation()
 
-                // Step 4: Build transcript
                 let result = Transcript(
                     segments: segments,
                     recordingURL: audioURL,
                     createdAt: Date()
                 )
-
-                // Step 5: Save alongside recording
                 try result.save()
 
                 await MainActor.run {
