@@ -15,6 +15,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupPopover()
         setupEventMonitor()
+
+        // Download Whisper model on first launch if not already present
+        Task {
+            let manager = recorder.transcriptionManager.modelManager
+            let model = recorder.transcriptionManager.selectedModel
+            if !ModelManager.modelExists(model) {
+                try? await manager.ensureModel(model)
+            }
+        }
     }
 
     private func setupStatusItem() {
