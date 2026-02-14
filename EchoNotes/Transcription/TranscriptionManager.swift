@@ -7,8 +7,11 @@ final class TranscriptionManager: ObservableObject {
     @Published var progress: Double = 0
     @Published var transcript: Transcript?
     @Published var error: String?
+    @Published var meetingNotes: MeetingNotes?
+    @Published var isGeneratingNotes = false
 
     let modelManager = ModelManager()
+    let oauthManager = OAuthManager()
     private var whisperEngine: WhisperEngine?
     private var loadedModel: WhisperModel?
     private var transcriptionTask: Task<Void, Never>?
@@ -96,11 +99,31 @@ final class TranscriptionManager: ObservableObject {
         await task.value
     }
 
+    /// Generate meeting notes from the current transcript using OpenAI.
+    func generateNotes() async {
+        guard let transcript, oauthManager.isSignedIn else { return }
+
+        isGeneratingNotes = true
+        meetingNotes = nil
+
+        do {
+            let token = try await oauthManager.getAccessToken()
+            let notes = try await MeetingNotesGenerator.generateNotes(transcript: transcript, accessToken: token)
+            meetingNotes = notes
+            try? notes.save(alongside: transcript.recordingURL)
+        } catch {
+            self.error = error.localizedDescription
+        }
+
+        isGeneratingNotes = false
+    }
+
     /// Reset state for a new transcription.
     func reset() {
         transcriptionTask?.cancel()
         transcriptionTask = nil
         transcript = nil
+        meetingNotes = nil
         error = nil
         progress = 0
     }

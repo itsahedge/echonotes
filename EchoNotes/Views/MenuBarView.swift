@@ -4,6 +4,7 @@ import SwiftUI
 struct MenuBarView: View {
     @ObservedObject var recorder: RecordingEngine
     weak var delegate: AppDelegate?
+    @State private var showSettings = false
 
     private var tm: TranscriptionManager { recorder.transcriptionManager }
 
@@ -22,11 +23,18 @@ struct MenuBarView: View {
                         Text("REC").font(.caption).foregroundStyle(.red)
                     }
                 }
+                Button(action: { showSettings.toggle() }) {
+                    Image(systemName: "gear")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
 
             Divider()
 
-            if recorder.isRecording {
+            if showSettings {
+                settingsView
+            } else if recorder.isRecording {
                 recordingView
             } else if tm.isTranscribing || tm.isDownloadingModel {
                 transcribingView
@@ -162,20 +170,28 @@ struct MenuBarView: View {
 
     private func transcriptResultView(_ transcript: Transcript) -> some View {
         VStack(spacing: 8) {
-            ScrollView {
-                Text(transcript.toTimestampedText())
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            if let notes = tm.meetingNotes {
+                meetingNotesView(notes)
+            } else {
+                ScrollView {
+                    Text(transcript.toTimestampedText())
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(maxHeight: .infinity)
             }
-            .frame(maxHeight: .infinity)
 
             HStack(spacing: 8) {
                 Button(action: {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
+                    if let notes = tm.meetingNotes {
+                        NSPasteboard.general.setString(notes.toMarkdown(), forType: .string)
+                    } else {
+                        NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
+                    }
                 }) {
-                    Label("Copy", systemImage: "doc.on.doc")
+                    Label(tm.meetingNotes != nil ? "Copy Notes" : "Copy", systemImage: "doc.on.doc")
                         .font(.caption)
                 }
 
@@ -194,7 +210,133 @@ struct MenuBarView: View {
                         .font(.caption)
                 }
             }
+
+            // AI notes buttons
+            if tm.oauthManager.isSignedIn && tm.meetingNotes == nil {
+                Divider()
+                if tm.isGeneratingNotes {
+                    HStack {
+                        ProgressView().controlSize(.small)
+                        Text("Generating notes…").font(.caption)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        Button(action: { Task { await tm.generateNotes() } }) {
+                            Label("Generate Meeting Notes", systemImage: "sparkles")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.borderedProminent)
+
+                    }
+                }
+            }
         }
+    }
+
+    private func meetingNotesView(_ notes: MeetingNotes) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Summary").font(.caption.bold())
+                Text(notes.summary).font(.caption)
+
+                if !notes.keyDecisions.isEmpty {
+                    Divider()
+                    Text("Key Decisions").font(.caption.bold())
+                    ForEach(notes.keyDecisions, id: \.self) { decision in
+                        HStack(alignment: .top, spacing: 4) {
+                            Text("•").font(.caption)
+                            Text(decision).font(.caption)
+                        }
+                    }
+                }
+
+                if !notes.actionItems.isEmpty {
+                    Divider()
+                    Text("Action Items").font(.caption.bold())
+                    ForEach(Array(notes.actionItems.enumerated()), id: \.offset) { _, item in
+                        HStack(alignment: .top, spacing: 4) {
+                            Text("☐").font(.caption)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(item.text).font(.caption)
+                                if let assignee = item.assignee, !assignee.isEmpty {
+                                    Text("→ \(assignee)").font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if !notes.openQuestions.isEmpty {
+                    Divider()
+                    Text("Open Questions").font(.caption.bold())
+                    ForEach(notes.openQuestions, id: \.self) { question in
+                        HStack(alignment: .top, spacing: 4) {
+                            Text("?").font(.caption).foregroundStyle(.orange)
+                            Text(question).font(.caption)
+                        }
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+        }
+        .frame(maxHeight: .infinity)
+    }
+
+    private var settingsView: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Settings").font(.title3)
+                Spacer()
+                Button(action: { showSettings = false }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            // OpenAI connection
+            HStack {
+                Image(systemName: "brain")
+                Text("OpenAI").font(.body)
+                Spacer()
+                if tm.oauthManager.isSignedIn {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("Connected").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            if tm.oauthManager.isSignedIn {
+                Button(action: { tm.oauthManager.signOut() }) {
+                    Text("Sign Out")
+                        .font(.caption)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+            } else {
+                Button(action: { Task { try? await tm.oauthManager.performSignIn() } }) {
+                    HStack {
+                        Image(systemName: "arrow.right.circle")
+                        Text("Sign in with OpenAI")
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
+                .font(.caption)
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+            Spacer()
+        }
+        .frame(maxHeight: .infinity)
     }
 
     // MARK: - Primary Button
