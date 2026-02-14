@@ -41,7 +41,7 @@ final class TranscriptionManager: ObservableObject {
     func finalizeLiveTranscription(recordingURL: URL) async {
         await streamingTranscriber.flush()
 
-        let segments = streamingTranscriber.segments
+        let segments = streamingTranscriber.flushedSegments + streamingTranscriber.segments
         guard !segments.isEmpty else { return }
 
         let result = Transcript(
