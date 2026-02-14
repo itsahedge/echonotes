@@ -59,6 +59,9 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
             config.width = 16
             config.height = 16
             
+            // Clean up the original stream before creating a new one to avoid leaking the delegate reference
+            try? stream.removeStreamOutput(self, type: .audio)
+            
             // Create a NEW stream with updated config (old stream may be in bad state)
             let fallbackStream = SCStream(filter: filter, configuration: config, delegate: self)
             try fallbackStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))

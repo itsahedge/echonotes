@@ -54,12 +54,11 @@ struct Transcript: Codable, Sendable {
             throw error
         }
         
-        // Write plain text
+        // Write plain text — don't delete the already-written JSON if this fails
         do {
             try toPlainText().write(to: txtURL, atomically: true, encoding: .utf8)
         } catch {
-            // Clean up both files on failure
-            try? FileManager.default.removeItem(at: jsonURL)
+            // Only clean up the txt file, preserve the valid JSON
             try? FileManager.default.removeItem(at: txtURL)
             throw error
         }
