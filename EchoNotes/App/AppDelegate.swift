@@ -67,7 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Remove event monitor to prevent leak. Called from Quit action and termination.
+    func removeEventMonitor() {
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
+            self.eventMonitor = nil
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
-        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        removeEventMonitor()
     }
 }

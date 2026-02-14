@@ -24,13 +24,17 @@ struct TimestampedBuffer: Sendable {
 final class AudioFileWriter: @unchecked Sendable {
     let outputURL: URL
 
-    /// Called on write errors (e.g. disk full). After an error, no further writes are accepted.
-    var onError: ((Error) -> Void)?
+    /// Called on write errors (e.g. disk full, buffer overflow). After an error, no further writes are accepted.
+    let onError: (@Sendable (Error) -> Void)?
 
     private let file: AVAudioFile
     private let sampleRate: Double
     private let format: AVAudioFormat
     private let lock = NSLock()
+
+    /// Maximum samples one source can buffer ahead of the other (10 seconds at sample rate).
+    /// Prevents OOM if one source stops sending data.
+    private let maxBufferLag: Int
 
     // Accumulate samples from each source, flush when we have both.
     // Offset-based to avoid O(n) shifts — compacts periodically.
@@ -40,9 +44,11 @@ final class AudioFileWriter: @unchecked Sendable {
     private var micOffset: Int = 0
     private var writeError: Error?
 
-    init(outputURL: URL, sampleRate: Double = 48000, channels: UInt32 = 2) throws {
+    init(outputURL: URL, sampleRate: Double = 48000, channels: UInt32 = 2, onError: (@Sendable (Error) -> Void)? = nil) throws {
         self.outputURL = outputURL
         self.sampleRate = sampleRate
+        self.onError = onError
+        self.maxBufferLag = Int(sampleRate) * 10 // 10 seconds
 
         // Stereo interleaved format for the output file
         guard let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: channels, interleaved: false) else {
@@ -80,6 +86,14 @@ final class AudioFileWriter: @unchecked Sendable {
     private func flushIfReady() {
         let sysAvailable = systemSamples.count - systemOffset
         let micAvailable = micSamples.count - micOffset
+
+        // Guard against unbounded buffer growth if one source stops sending data
+        if sysAvailable > maxBufferLag || micAvailable > maxBufferLag {
+            writeError = WriterError.bufferOverflow
+            onError?(WriterError.bufferOverflow)
+            return
+        }
+
         let count = min(sysAvailable, micAvailable)
         guard count > 0 else { return }
 
@@ -100,16 +114,9 @@ final class AudioFileWriter: @unchecked Sendable {
         if systemOffset == systemSamples.count {
             systemSamples.removeAll(keepingCapacity: true)
             systemOffset = 0
-        } else if systemOffset > 48000 {
-            // Compact periodically to avoid unbounded growth
-            systemSamples.removeFirst(systemOffset)
-            systemOffset = 0
         }
         if micOffset == micSamples.count {
             micSamples.removeAll(keepingCapacity: true)
-            micOffset = 0
-        } else if micOffset > 48000 {
-            micSamples.removeFirst(micOffset)
             micOffset = 0
         }
 
@@ -140,5 +147,12 @@ final class AudioFileWriter: @unchecked Sendable {
 
 enum WriterError: LocalizedError {
     case formatCreationFailed
-    var errorDescription: String? { "Failed to create audio format." }
+    case bufferOverflow
+
+    var errorDescription: String? {
+        switch self {
+        case .formatCreationFailed: return "Failed to create audio format."
+        case .bufferOverflow: return "Audio source mismatch — one stream stopped sending data."
+        }
+    }
 }
