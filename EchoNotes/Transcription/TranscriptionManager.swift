@@ -34,8 +34,8 @@ final class TranscriptionManager: ObservableObject {
     }
 
     /// Finalize live transcription — flush remaining audio and build transcript.
-    func finalizeLiveTranscription(recordingURL: URL) {
-        streamingTranscriber.flush()
+    func finalizeLiveTranscription(recordingURL: URL) async {
+        await streamingTranscriber.flush()
 
         let segments = streamingTranscriber.segments
         guard !segments.isEmpty else { return }
@@ -45,7 +45,11 @@ final class TranscriptionManager: ObservableObject {
             recordingURL: recordingURL,
             createdAt: Date()
         )
-        try? result.save()
+        do {
+            try result.save()
+        } catch {
+            self.error = "Failed to save transcript: \(error.localizedDescription)"
+        }
         transcript = result
     }
 

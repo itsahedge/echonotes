@@ -14,20 +14,19 @@ final class StreamingTranscriber: ObservableObject {
     @Published var error: String?
 
     /// How many seconds of audio to accumulate before running inference.
-    private let chunkDurationSeconds: Double = 30.0
+    let chunkDurationSeconds: Double = 30.0
 
     private var whisperEngine: WhisperEngine?
-    private var converter: AVAudioConverter?
     private var pendingSamples: [Float] = [] // 48kHz mono
-    private var chunkIndex: Int = 0
+    private var totalSamplesProcessed: Int = 0 // Track actual position for time offsets
     private var processingTask: Task<Void, Never>?
-    private let sampleRate: Double = 48000
+    private var queuedChunks: [[Float]] = [] // Chunks waiting to be processed
+    let sampleRate: Double = 48000
     private let whisperSampleRate: Double = 16000
 
     /// Prepare the transcriber with a loaded Whisper engine.
     func prepare(engine: WhisperEngine) {
         self.whisperEngine = engine
-        setupConverter()
     }
 
     /// Feed system audio samples (48kHz mono Float32) from the recording.
@@ -38,15 +37,28 @@ final class StreamingTranscriber: ObservableObject {
 
             let samplesNeeded = Int(chunkDurationSeconds * sampleRate)
             if self.pendingSamples.count >= samplesNeeded {
-                self.processNextChunk()
+                self.enqueueChunk()
             }
         }
     }
 
     /// Process any remaining audio when recording stops.
-    func flush() {
-        guard !pendingSamples.isEmpty else { return }
-        processNextChunk()
+    /// Waits for any in-progress chunk to finish, then processes the remainder.
+    func flush() async {
+        // Wait for current processing to finish
+        if let task = processingTask {
+            await task.value
+        }
+
+        // Enqueue any remaining samples
+        if !pendingSamples.isEmpty {
+            enqueueChunk()
+        }
+
+        // Process remaining queued chunks
+        if let task = processingTask {
+            await task.value
+        }
     }
 
     /// Reset all state for a new recording.
@@ -55,44 +67,40 @@ final class StreamingTranscriber: ObservableObject {
         processingTask = nil
         segments = []
         pendingSamples = []
-        chunkIndex = 0
+        queuedChunks = []
+        totalSamplesProcessed = 0
         isProcessing = false
         error = nil
     }
 
     // MARK: - Private
 
-    private func setupConverter() {
-        let sourceFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: sampleRate,
-            channels: 1,
-            interleaved: false
-        )!
-        let targetFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: whisperSampleRate,
-            channels: 1,
-            interleaved: false
-        )!
-        converter = AVAudioConverter(from: sourceFormat, to: targetFormat)
+    /// Move pending samples into the processing queue and kick off processing.
+    private func enqueueChunk() {
+        guard !pendingSamples.isEmpty else { return }
+        queuedChunks.append(pendingSamples)
+        pendingSamples = []
+        processNextIfIdle()
     }
 
-    private func processNextChunk() {
-        guard whisperEngine != nil, !isProcessing else { return }
+    /// Start processing the next queued chunk if not already busy.
+    private func processNextIfIdle() {
+        guard !isProcessing, !queuedChunks.isEmpty, whisperEngine != nil else { return }
 
-        // Grab all pending samples
-        let chunk = pendingSamples
-        pendingSamples = []
-        let currentChunkIndex = chunkIndex
-        chunkIndex += 1
+        let chunk = queuedChunks.removeFirst()
+        let sampleOffset = totalSamplesProcessed
+        totalSamplesProcessed += chunk.count
 
         isProcessing = true
 
         processingTask = Task {
             do {
-                let resampled = try resampleTo16kHz(chunk)
-                let timeOffset = Double(currentChunkIndex) * chunkDurationSeconds
+                let resampled = try Self.resampleTo16kHz(
+                    chunk,
+                    sourceSampleRate: sampleRate,
+                    targetSampleRate: whisperSampleRate
+                )
+                let timeOffset = Double(sampleOffset) / sampleRate
 
                 guard let engine = whisperEngine else { return }
 
@@ -113,15 +121,37 @@ final class StreamingTranscriber: ObservableObject {
             }
 
             isProcessing = false
+
+            // Process next queued chunk if any
+            processNextIfIdle()
         }
     }
 
-    /// Resample 48kHz mono samples to 16kHz for Whisper.
-    private func resampleTo16kHz(_ samples: [Float]) throws -> [Float] {
-        guard let converter else { throw WhisperError.audioConversionFailed }
+    /// Resample mono samples to 16kHz for Whisper.
+    /// Creates a fresh converter each time to avoid state leakage between chunks.
+    nonisolated static func resampleTo16kHz(
+        _ samples: [Float],
+        sourceSampleRate: Double,
+        targetSampleRate: Double
+    ) throws -> [Float] {
+        guard !samples.isEmpty else { return [] }
 
-        let sourceFormat = converter.inputFormat
-        let targetFormat = converter.outputFormat
+        let sourceFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: sourceSampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+        let targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: targetSampleRate,
+            channels: 1,
+            interleaved: false
+        )!
+
+        guard let converter = AVAudioConverter(from: sourceFormat, to: targetFormat) else {
+            throw WhisperError.audioConversionFailed
+        }
 
         let frameCount = AVAudioFrameCount(samples.count)
         guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: frameCount) else {
@@ -129,14 +159,13 @@ final class StreamingTranscriber: ObservableObject {
         }
         inputBuffer.frameLength = frameCount
 
-        // Copy samples into the input buffer
         if let channelData = inputBuffer.floatChannelData {
             samples.withUnsafeBufferPointer { ptr in
                 channelData[0].update(from: ptr.baseAddress!, count: samples.count)
             }
         }
 
-        let ratio = whisperSampleRate / sampleRate
+        let ratio = targetSampleRate / sourceSampleRate
         let outputFrameCount = AVAudioFrameCount(Double(samples.count) * ratio) + 256
         guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else {
             throw WhisperError.audioConversionFailed

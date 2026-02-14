@@ -151,7 +151,7 @@ final class RecordingEngine: ObservableObject {
 
             if transcriptionMode == .live {
                 // Finalize live transcription — flush remaining chunks
-                transcriptionManager.finalizeLiveTranscription(recordingURL: url)
+                await transcriptionManager.finalizeLiveTranscription(recordingURL: url)
             } else {
                 transcriptionManager.reset()
                 // Auto-transcribe if enabled (post-recording mode)
