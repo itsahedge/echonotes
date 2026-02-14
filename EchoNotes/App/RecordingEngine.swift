@@ -2,10 +2,23 @@ import Foundation
 import SwiftUI
 import AppKit
 import AVFoundation
+import os
 
 /// Central recording engine — coordinates system audio + mic capture and writes to file.
+///
+/// **Error Handling Strategy:**
+/// - **Audio capture layer** (SystemAudioCapture, MicrophoneCapture): Uses closures (`onError`)
+///   to propagate errors asynchronously from background threads.
+/// - **Recording engine**: Surfaces errors via `@Published var errorMessage` for UI binding.
+/// - **Transcription layer**: Uses throwing functions for synchronous errors, publishes async
+///   errors via TranscriptionManager's `@Published var error`.
+///
+/// This mixed approach matches the concurrency model: audio callbacks need async propagation,
+/// while engine state changes are published to UI observers, and transcription operations
+/// use structured concurrency with throws.
 @MainActor
 final class RecordingEngine: ObservableObject {
+    private let logger = Logger(subsystem: "com.echonotes", category: "RecordingEngine")
     @Published var isRecording = false
     @Published var duration: TimeInterval = 0
     @Published var micLevel: Float = 0
@@ -61,7 +74,7 @@ final class RecordingEngine: ObservableObject {
 
         do {
             // Set up audio file writer (M4A/AAC, 48kHz stereo — system L, mic R)
-            let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: 48000, channels: 2) { [weak self] error in
+            let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: AudioConfig.sampleRate, channels: 2) { [weak self] error in
                 Task { @MainActor in
                     self?.errorMessage = "Recording error: \(error.localizedDescription)"
                     await self?.stopRecording()
@@ -99,20 +112,20 @@ final class RecordingEngine: ObservableObject {
                     self?.transcriptionManager.streamingTranscriber.feedSamples(buffer.samples)
                 }
                 Task { @MainActor in
-                    self?.systemLevel = TimestampedBuffer.rmsLevel(buffer.samples)
+                    self?.systemLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
                 }
             }
 
             micCapture.onBuffer = { [weak self] buffer in
                 self?.audioWriter?.writeMicBuffer(buffer)
                 Task { @MainActor in
-                    self?.micLevel = TimestampedBuffer.rmsLevel(buffer.samples)
+                    self?.micLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
                 }
             }
 
-            try await systemCapture.startCapture(sampleRate: 48000)
+            try await systemCapture.startCapture(sampleRate: AudioConfig.sampleRate)
             do {
-                try micCapture.startCapture(sampleRate: 48000)
+                try micCapture.startCapture(sampleRate: AudioConfig.sampleRate)
             } catch {
                 // System capture already started — must stop it before bailing
                 await systemCapture.stopCapture()
@@ -121,6 +134,7 @@ final class RecordingEngine: ObservableObject {
 
             recordingStartTime = Date()
             isRecording = true
+            logger.info("Recording started: \(fileURL.lastPathComponent)")
 
             // Duration timer
             durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -156,7 +170,7 @@ final class RecordingEngine: ObservableObject {
 
         if let url {
             lastRecordingURL = url
-            print("Recording saved: \(url.path)")
+            logger.info("Recording stopped: \(url.lastPathComponent), duration: \(String(format: "%.1f", self.duration))s")
 
             if transcriptionMode == .live {
                 // Finalize live transcription — flush remaining chunks
