@@ -43,11 +43,18 @@ final class MicrophoneCapture: @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            // Check if engine stopped unexpectedly
-            if !self.engine.isRunning && self._isCapturing.withLock({ $0 }) {
+            // Atomically check and update _isCapturing to avoid races with stopCapture()
+            let wasCapturing = self._isCapturing.withLock { current -> Bool in
+                guard current else { return false }
+                if !self.engine.isRunning {
+                    current = false
+                    return true
+                }
+                return false
+            }
+            if wasCapturing {
                 let error = MicrophoneError.deviceDisconnected
                 self.logger.error("Microphone configuration changed, engine stopped: \(error.localizedDescription)")
-                self._isCapturing.withLock { $0 = false }
                 self.onError?(error)
             }
         }

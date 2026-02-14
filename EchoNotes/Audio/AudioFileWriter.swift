@@ -46,6 +46,9 @@ final class AudioFileWriter: @unchecked Sendable {
     private var micOffset: Int = 0
     private var writeError: Error?
 
+    /// Tracks in-flight write callbacks so finalize() can wait for them to complete.
+    private let inflightGroup = DispatchGroup()
+
     init(outputURL: URL, sampleRate: Double = AudioConfig.sampleRate, channels: UInt32 = 2, onError: (@Sendable (Error) -> Void)? = nil) throws {
         self.outputURL = outputURL
         self.sampleRate = sampleRate
@@ -69,6 +72,8 @@ final class AudioFileWriter: @unchecked Sendable {
     }
 
     func writeSystemBuffer(_ buffer: SourcedAudioBuffer) {
+        inflightGroup.enter()
+        defer { inflightGroup.leave() }
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
         systemSamples.append(contentsOf: buffer.samples)
@@ -77,6 +82,8 @@ final class AudioFileWriter: @unchecked Sendable {
     }
 
     func writeMicBuffer(_ buffer: SourcedAudioBuffer) {
+        inflightGroup.enter()
+        defer { inflightGroup.leave() }
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
         micSamples.append(contentsOf: buffer.samples)
@@ -146,6 +153,8 @@ final class AudioFileWriter: @unchecked Sendable {
     /// synchronization at the capture layer to ensure all callbacks have finished before
     /// finalize is invoked.
     func finalize() {
+        // Wait for all in-flight write callbacks to complete before finalizing.
+        inflightGroup.wait()
         lock.lock()
         guard writeError == nil else { lock.unlock(); return }
         // Pad the shorter stream with silence

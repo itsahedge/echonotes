@@ -75,6 +75,18 @@ final class RecordingEngine: ObservableObject {
             return
         }
 
+        // Check available disk space before recording
+        do {
+            let attrs = try FileManager.default.attributesOfFileSystem(forPath: saveDirectory.path)
+            if let freeSpace = attrs[.systemFreeSize] as? Int64, freeSpace < 500 * 1024 * 1024 {
+                let freeMB = freeSpace / (1024 * 1024)
+                errorMessage = "Low disk space (\(freeMB) MB free). At least 500 MB recommended for recording."
+                return
+            }
+        } catch {
+            logger.warning("Could not check disk space: \(error.localizedDescription)")
+        }
+
         // Create output file with local timezone timestamp
         let timestamp = Self.recordingTimestampFormatter.string(from: Date())
         let filename = "recording-\(timestamp).m4a"
