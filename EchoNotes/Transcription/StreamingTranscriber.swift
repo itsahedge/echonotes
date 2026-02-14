@@ -24,7 +24,6 @@ final class StreamingTranscriber: ObservableObject {
     private var totalSamplesProcessed: Int = 0
     private var processingTask: Task<Void, Never>?
     private let sampleRate: Double = 48000
-    private let whisperRate: Double = 16000
 
     /// Lock-protected incoming sample buffer. Written from audio callbacks,
     /// drained on MainActor. The lock guarantees FIFO ordering regardless
