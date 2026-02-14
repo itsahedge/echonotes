@@ -37,11 +37,31 @@ AVAudioEngine (microphone)      ──→ Right channel ──┘
 ```bash
 git clone <repo>
 cd echonotes
-swift build
-# Or: open Package.swift in Xcode
 ```
 
-On first launch, the app will download a Whisper model (~150MB for Base English).
+### Run from Xcode (recommended)
+
+```bash
+open Package.swift
+```
+
+Then press **⌘R** to build and run. The app will appear as a waveform icon in your menu bar.
+
+### Run from command line
+
+```bash
+swift build
+.build/debug/EchoNotes
+```
+
+### Build a standalone app
+
+```bash
+swift build -c release
+# Binary at: .build/release/EchoNotes
+```
+
+On first launch, the app will download a Whisper model (~150MB for Base English). This only happens once — the model is cached locally for future use.
 
 ### Permissions
 
