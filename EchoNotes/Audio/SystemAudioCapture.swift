@@ -13,14 +13,15 @@ import os
 ///
 /// Requires "Screen & System Audio Recording" permission (macOS requirement for audio API access).
 final class SystemAudioCapture: NSObject, @unchecked Sendable {
-    var onBuffer: ((TimestampedBuffer) -> Void)?
+    var onBuffer: ((SourcedAudioBuffer) -> Void)?
     var onError: ((Error) -> Void)?
 
     private var stream: SCStream?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
+    private let logger = Logger(subsystem: "com.echonotes", category: "SystemAudioCapture")
 
     /// Start capturing system audio at the given sample rate (mono Float32).
-    func startCapture(sampleRate: Double = 48000) async throws {
+    func startCapture(sampleRate: Double = AudioConfig.sampleRate) async throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
@@ -78,16 +79,16 @@ extension SystemAudioCapture: SCStreamOutput {
             let samples = rawData.withUnsafeBytes { ptr in
                 Array(ptr.bindMemory(to: Float.self).prefix(floatCount))
             }
-            onBuffer?(TimestampedBuffer(samples: samples, source: .system))
+            onBuffer?(SourcedAudioBuffer(samples: samples, source: .system))
         } catch {
-            print("Error extracting system audio: \(error)")
+            logger.error("Error extracting system audio: \(error.localizedDescription)")
         }
     }
 }
 
 extension SystemAudioCapture: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        print("System audio stream error: \(error)")
+        logger.error("System audio stream stopped with error: \(error.localizedDescription)")
         _isCapturing.withLock { $0 = false }
         onError?(error)
     }
