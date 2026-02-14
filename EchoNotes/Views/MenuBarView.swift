@@ -116,7 +116,7 @@ struct MenuBarView: View {
                         }
                     }
                     .frame(maxHeight: 120)
-                    .onChange(of: tm.streamingTranscriber.segments.count) { newCount in
+                    .onChange(of: tm.streamingTranscriber.segments.count) { _, newCount in
                         if newCount > 0 {
                             proxy.scrollTo(newCount - 1, anchor: .bottom)
                         }
