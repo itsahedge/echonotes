@@ -27,4 +27,32 @@ struct PermissionChecker {
         let screen = await requestScreenRecordingPermission()
         return mic && screen
     }
+    
+    /// Check permissions individually and return a specific error message if any are missing.
+    func checkPermissionsWithMessage() async -> String? {
+        let mic = await requestMicrophonePermission()
+        let screen = await requestScreenRecordingPermission()
+        
+        if !mic && !screen {
+            return """
+            EchoNotes needs Microphone and Screen Recording permissions.
+            
+            Enable them in: System Settings → Privacy & Security → Microphone & Screen Recording
+            """
+        } else if !mic {
+            return """
+            EchoNotes needs Microphone permission.
+            
+            Enable it in: System Settings → Privacy & Security → Microphone
+            """
+        } else if !screen {
+            return """
+            EchoNotes needs Screen Recording permission (for system audio capture only — no video is recorded).
+            
+            Enable it in: System Settings → Privacy & Security → Screen Recording
+            """
+        }
+        
+        return nil
+    }
 }
