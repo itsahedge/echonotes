@@ -76,8 +76,54 @@ struct MenuBarView: View {
                 levelMeter(label: "System", level: recorder.systemLevel)
                 levelMeter(label: "Mic", level: recorder.micLevel)
             }
+
+            // Live transcript display
+            if recorder.transcriptionMode == .live {
+                liveTranscriptView
+            }
         }
         .frame(maxHeight: .infinity)
+    }
+
+    private var liveTranscriptView: some View {
+        VStack(spacing: 4) {
+            Divider()
+            HStack {
+                if tm.streamingTranscriber.isProcessing {
+                    ProgressView().controlSize(.mini)
+                }
+                Text("Live Transcript")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            if tm.streamingTranscriber.segments.isEmpty {
+                Text("Listening…")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(tm.streamingTranscriber.segments.enumerated()), id: \.offset) { idx, segment in
+                                Text(segment.text.trimmingCharacters(in: .whitespaces))
+                                    .font(.caption)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .id(idx)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 120)
+                    .onChange(of: tm.streamingTranscriber.segments.count) { newCount in
+                        if newCount > 0 {
+                            proxy.scrollTo(newCount - 1, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var idleView: some View {
@@ -92,10 +138,25 @@ struct MenuBarView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
-            Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
-                .font(.caption)
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+            // Transcription mode picker
+            Picker("Transcription", selection: $recorder.transcriptionModeRaw) {
+                ForEach(TranscriptionMode.allCases, id: \.rawValue) { mode in
+                    Text(mode.rawValue).tag(mode.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .font(.caption)
+
+            if recorder.transcriptionMode == .postRecording {
+                Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
+                    .font(.caption)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+            } else {
+                Text("Transcribes while you record")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxHeight: .infinity)
     }
