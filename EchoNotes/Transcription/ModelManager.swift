@@ -37,6 +37,7 @@ final class ModelManager: ObservableObject {
 
     private var whisperKit: WhisperKit?
     private var loadedModel: WhisperModel?
+    private var progressMonitorTask: Task<Void, Never>?
 
     /// Get a ready-to-use WhisperEngine, downloading the model if needed.
     func ensureEngine(for model: WhisperModel) async throws -> WhisperEngine {
@@ -48,9 +49,16 @@ final class ModelManager: ObservableObject {
         downloadProgress = 0
         error = nil
 
-        defer { isDownloading = false }
+        defer { 
+            isDownloading = false
+            progressMonitorTask?.cancel()
+            progressMonitorTask = nil
+        }
 
         do {
+            // Start monitoring download progress
+            monitorDownloadProgress(for: model)
+            
             let config = WhisperKitConfig(model: model.rawValue)
             let kit = try await WhisperKit(config)
             self.whisperKit = kit
@@ -69,5 +77,40 @@ final class ModelManager: ObservableObject {
         let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
         return FileManager.default.fileExists(atPath: modelDir.path)
+    }
+
+    /// Monitor download progress by polling cache directory size.
+    /// Updates `downloadProgress` based on actual bytes downloaded vs expected model size.
+    private func monitorDownloadProgress(for model: WhisperModel) {
+        let expectedBytes = Int64(model.approximateSizeMB) * 1024 * 1024
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+        
+        progressMonitorTask = Task { @MainActor in
+            while !Task.isCancelled {
+                let currentSize = directorySize(at: modelDir)
+                let progress = min(0.99, Double(currentSize) / Double(expectedBytes))
+                self.downloadProgress = progress
+                
+                try? await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            }
+        }
+    }
+
+    /// Calculate total size of a directory and its contents.
+    private nonisolated func directorySize(at url: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey],
+            options: [.skipsHiddenFiles]
+        ) else { return 0 }
+        
+        var totalSize: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            guard let resourceValues = try? fileURL.resourceValues(forKeys: [.fileSizeKey]),
+                  let fileSize = resourceValues.fileSize else { continue }
+            totalSize += Int64(fileSize)
+        }
+        return totalSize
     }
 }

@@ -138,6 +138,7 @@ final class StreamingTranscriber: ObservableObject {
             isProcessing = false
             
             // Drain queued samples with while-loop instead of recursion
+            // Use defer to ensure isProcessing is always reset, even on error/break
             while !queuedSamples.isEmpty {
                 let queued = queuedSamples
                 queuedSamples = []
@@ -145,6 +146,8 @@ final class StreamingTranscriber: ObservableObject {
                 let queuedTimeOffset = Double(totalSamplesProcessed) / sampleRate
                 totalSamplesProcessed += queued.count
                 isProcessing = true
+                
+                defer { isProcessing = false }
                 
                 do {
                     let resampled = try resample(queued)
@@ -162,8 +165,6 @@ final class StreamingTranscriber: ObservableObject {
                     self.error = "Live transcription error: \(error.localizedDescription)"
                     break
                 }
-                
-                isProcessing = false
             }
         }
     }
