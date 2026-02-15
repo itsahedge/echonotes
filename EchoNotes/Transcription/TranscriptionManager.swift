@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// How transcription should be performed.
 enum TranscriptionMode: String, CaseIterable {
@@ -17,6 +18,7 @@ enum TranscriptionMode: String, CaseIterable {
 /// logic to evolve independently.
 @MainActor
 final class TranscriptionManager: ObservableObject {
+    private let logger = Logger(subsystem: "com.echonotes", category: "TranscriptionManager")
     @Published var isTranscribing = false
     @Published var progress: Double = 0
     @Published var transcript: Transcript?
@@ -77,7 +79,9 @@ final class TranscriptionManager: ObservableObject {
 
         let task = Task {
             do {
+                logger.info("Starting transcription for \(audioURL.lastPathComponent)")
                 let engine = try await modelManager.ensureEngine(for: selectedModel)
+                logger.info("Engine ready, transcribing...")
                 whisperEngine = engine
 
                 try Task.checkCancellation()
@@ -104,6 +108,7 @@ final class TranscriptionManager: ObservableObject {
             } catch is CancellationError {
                 // Already handled by cancel()
             } catch {
+                logger.error("Transcription failed: \(error.localizedDescription)")
                 await MainActor.run {
                     self.error = error.localizedDescription
                 }
