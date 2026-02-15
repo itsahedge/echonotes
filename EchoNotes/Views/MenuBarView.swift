@@ -40,12 +40,15 @@ struct MenuBarView: View {
             }
 
             // Error messages
-            if let error = recorder.errorMessage ?? tm.error {
+            if let error = recorder.errorMessage ?? tm.error ?? tm.modelManager.error {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
+                    .padding(.vertical, 4)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(6)
             }
 
             // Primary action button
