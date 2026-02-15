@@ -77,19 +77,19 @@ final class ModelManager: ObservableObject {
     }
 
     /// Check if WhisperKit models are likely cached.
-    /// Best-effort — WhisperKit manages its own cache; we just check if the directory exists.
+    /// WhisperKit's Hub library stores models in ~/Documents/huggingface/models/
     nonisolated static func modelLikelyCached() -> Bool {
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let modelDir = docs.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
         return FileManager.default.fileExists(atPath: modelDir.path)
     }
 
-    /// Monitor download progress by polling cache directory size.
-    /// Updates `downloadProgress` based on actual bytes downloaded vs expected model size.
+    /// Monitor download progress by polling the model directory size.
+    /// WhisperKit's Hub library downloads to ~/Documents/huggingface/models/
     private func monitorDownloadProgress(for model: WhisperModel) {
         let expectedBytes = Int64(model.approximateSizeMB) * 1024 * 1024
-        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
-        let modelDir = cacheDir.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let modelDir = docs.appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
         
         progressMonitorTask = Task {
             while !Task.isCancelled {
