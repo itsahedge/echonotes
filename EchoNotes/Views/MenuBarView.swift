@@ -4,9 +4,9 @@ import SwiftUI
 /// Recording controls, level meters, and transcript display are extracted into separate components.
 struct MenuBarView: View {
     @ObservedObject var recorder: RecordingEngine
+    @ObservedObject var tm: TranscriptionManager
+    @ObservedObject var modelManager: ModelManager
     weak var delegate: AppDelegate?
-
-    private var tm: TranscriptionManager { recorder.transcriptionManager }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -29,7 +29,7 @@ struct MenuBarView: View {
 
             if recorder.isRecording {
                 recordingView
-            } else if tm.isTranscribing || tm.modelManager.isDownloading {
+            } else if tm.isTranscribing || modelManager.isDownloading {
                 transcribingView
             } else if let transcript = tm.transcript {
                 TranscriptDisplayView(transcript: transcript, onReset: { tm.reset() })
@@ -40,7 +40,7 @@ struct MenuBarView: View {
             }
 
             // Error messages
-            if let error = recorder.errorMessage ?? tm.error ?? tm.modelManager.error {
+            if let error = recorder.errorMessage ?? tm.error ?? modelManager.error {
                 Text(error)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -211,12 +211,12 @@ struct MenuBarView: View {
 
     private var transcribingView: some View {
         VStack(spacing: 12) {
-            if tm.modelManager.isDownloading {
+            if modelManager.isDownloading {
                 Text("Downloading model…")
                     .font(.title3)
-                ProgressView(value: tm.modelManager.downloadProgress)
+                ProgressView(value: modelManager.downloadProgress)
                     .progressViewStyle(.linear)
-                Text("\(Int(tm.modelManager.downloadProgress * 100))%")
+                Text("\(Int(modelManager.downloadProgress * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {

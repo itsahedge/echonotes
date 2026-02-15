@@ -45,7 +45,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupPopover() {
         popover = NSPopover()
         popover.behavior = .transient
-        let view = MenuBarView(recorder: recorder, delegate: self)
+        let view = MenuBarView(
+            recorder: recorder,
+            tm: recorder.transcriptionManager,
+            modelManager: recorder.transcriptionManager.modelManager,
+            delegate: self
+        )
         popover.contentViewController = NSHostingController(rootView: view)
     }
 
