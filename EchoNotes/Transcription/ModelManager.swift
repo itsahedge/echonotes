@@ -1,5 +1,6 @@
 import Foundation
 import WhisperKit
+import os
 
 /// Supported Whisper model sizes.
 enum WhisperModel: String, CaseIterable, Sendable {
@@ -31,6 +32,7 @@ enum WhisperModel: String, CaseIterable, Sendable {
 /// WhisperKit handles model downloads and caching internally.
 @MainActor
 final class ModelManager: ObservableObject {
+    private let logger = Logger(subsystem: "com.echonotes", category: "ModelManager")
     @Published var isDownloading = false
     @Published var downloadProgress: Double = 0
     @Published var error: String?
@@ -59,14 +61,17 @@ final class ModelManager: ObservableObject {
             // Start monitoring download progress
             monitorDownloadProgress(for: model)
             
+            logger.info("Initializing WhisperKit with model: \(model.rawValue)")
             let config = WhisperKitConfig(model: model.rawValue)
             let kit = try await WhisperKit(config)
+            logger.info("WhisperKit initialized successfully")
             self.whisperKit = kit
             self.loadedModel = model
             self.downloadProgress = 1.0
             return WhisperEngine(whisperKit: kit)
         } catch {
-            self.error = "Failed to load model: \(error.localizedDescription)"
+            logger.error("WhisperKit failed: \(error.localizedDescription)")
+            self.error = "Model error: \(error.localizedDescription)"
             throw error
         }
     }
