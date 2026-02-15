@@ -5,6 +5,24 @@ struct TranscriptSegment: Codable, Sendable, Equatable {
     let startTime: TimeInterval
     let endTime: TimeInterval
     let text: String
+
+    /// Text with WhisperKit control tokens stripped out.
+    var cleanText: String {
+        var result = text
+        // Remove angle-bracket tokens: <|startoftranscript|>, <|endoftext|>, <|0.00|>, etc.
+        result = result.replacingOccurrences(
+            of: "<\\|[^|]*\\|>",
+            with: "",
+            options: .regularExpression
+        )
+        // Remove bracket tokens: [BLANK_AUDIO], [MUSIC], etc.
+        result = result.replacingOccurrences(
+            of: "\\[\\w+(?:_\\w+)*\\]",
+            with: "",
+            options: .regularExpression
+        )
+        return result.trimmingCharacters(in: .whitespaces)
+    }
 }
 
 /// A complete transcript of a recording, containing timestamped segments.
@@ -13,19 +31,20 @@ struct Transcript: Codable, Sendable {
     let recordingURL: URL
     let createdAt: Date
 
-    /// Plain text — all segments joined with spaces, trimmed.
+    /// Plain text — all segments joined with spaces, control tokens stripped.
     func toPlainText() -> String {
-        segments.map { $0.text.trimmingCharacters(in: .whitespaces) }
+        segments.map { $0.cleanText }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
     }
 
     /// Timestamped text with `[MM:SS - MM:SS]` prefixes per segment.
     func toTimestampedText() -> String {
-        segments.map { segment in
+        segments.compactMap { segment in
+            let text = segment.cleanText
+            guard !text.isEmpty else { return nil }
             let start = Self.formatTimestamp(segment.startTime)
             let end = Self.formatTimestamp(segment.endTime)
-            let text = segment.text.trimmingCharacters(in: .whitespaces)
             return "[\(start) - \(end)] \(text)"
         }.joined(separator: "\n")
     }

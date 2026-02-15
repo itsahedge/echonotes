@@ -8,8 +8,8 @@ struct TranscriptDisplayView: View {
     var body: some View {
         VStack(spacing: 8) {
             ScrollView {
-                Text(transcript.toTimestampedText())
-                    .font(.system(.caption, design: .monospaced))
+                Text(transcript.toPlainText())
+                    .font(.system(.caption))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .textSelection(.enabled)
             }
