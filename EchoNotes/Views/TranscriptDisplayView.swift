@@ -3,7 +3,7 @@ import SwiftUI
 /// Displays a completed transcript with copy and open file actions.
 struct TranscriptDisplayView: View {
     let transcript: Transcript
-    let onReset: () -> Void
+    let onNew: () -> Void
     
     var body: some View {
         VStack(spacing: 8) {
@@ -36,7 +36,7 @@ struct TranscriptDisplayView: View {
 
                 Spacer()
 
-                Button(action: onReset) {
+                Button(action: onNew) {
                     Label("New", systemImage: "arrow.counterclockwise")
                         .font(.caption)
                 }
