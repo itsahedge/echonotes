@@ -29,7 +29,7 @@ struct MenuBarView: View {
 
             if recorder.isRecording {
                 recordingView
-            } else if tm.isTranscribing || modelManager.isDownloading {
+            } else if tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
                 transcribingView
             } else if let transcript = tm.transcript {
                 TranscriptDisplayView(transcript: transcript, onNew: {
@@ -222,6 +222,11 @@ struct MenuBarView: View {
                 Text("\(Int(modelManager.downloadProgress * 100))%")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if modelManager.isLoading {
+                Text("Loading model…")
+                    .font(.title3)
+                ProgressView()
+                    .controlSize(.small)
             } else {
                 Text("Transcribing…")
                     .font(.title3)

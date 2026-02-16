@@ -34,6 +34,7 @@ enum WhisperModel: String, CaseIterable, Sendable {
 final class ModelManager: ObservableObject {
     private let logger = Logger(subsystem: "com.echonotes", category: "ModelManager")
     @Published var isDownloading = false
+    @Published var isLoading = false
     @Published var downloadProgress: Double = 0
     @Published var error: String?
 
@@ -47,21 +48,26 @@ final class ModelManager: ObservableObject {
             return WhisperEngine(whisperKit: whisperKit)
         }
 
-        isDownloading = true
-        downloadProgress = 0
         error = nil
+        let needsDownload = !Self.modelLikelyCached()
+        
+        if needsDownload {
+            isDownloading = true
+            downloadProgress = 0
+            monitorDownloadProgress(for: model)
+        } else {
+            isLoading = true
+        }
 
         defer { 
             isDownloading = false
+            isLoading = false
             progressMonitorTask?.cancel()
             progressMonitorTask = nil
         }
 
         do {
-            // Start monitoring download progress
-            monitorDownloadProgress(for: model)
-            
-            logger.info("Initializing WhisperKit with model: \(model.rawValue)")
+            logger.info("Initializing WhisperKit with model: \(model.rawValue) (cached: \(!needsDownload))")
             let config = WhisperKitConfig(model: model.rawValue)
             let kit = try await WhisperKit(config)
             logger.info("WhisperKit initialized successfully")
