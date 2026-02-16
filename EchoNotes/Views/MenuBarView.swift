@@ -32,7 +32,10 @@ struct MenuBarView: View {
             } else if tm.isTranscribing || modelManager.isDownloading {
                 transcribingView
             } else if let transcript = tm.transcript {
-                TranscriptDisplayView(transcript: transcript, onReset: { tm.reset() })
+                TranscriptDisplayView(transcript: transcript, onNew: {
+                    tm.reset()
+                    recorder.lastRecordingURL = nil
+                })
             } else if recorder.lastRecordingURL != nil {
                 readyToTranscribeView
             } else {
