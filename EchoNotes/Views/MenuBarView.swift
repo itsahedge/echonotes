@@ -120,7 +120,7 @@ struct MenuBarView: View {
                             // Only show the last 50 segments for performance
                             // Full array is preserved in StreamingTranscriber.segments for final transcript
                             ForEach(Array(recentSegments.enumerated()), id: \.offset) { idx, segment in
-                                Text(segment.text.trimmingCharacters(in: .whitespaces))
+                                Text(segment.cleanText)
                                     .font(.caption)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     .id(idx)
