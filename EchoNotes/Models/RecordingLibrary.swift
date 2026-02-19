@@ -52,17 +52,17 @@ final class RecordingLibrary: ObservableObject {
     /// Scan the recordings directory for entries. File I/O runs on a background thread.
     func scan() {
         let directory = saveDirectory
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let results = Self.scanDirectory(directory)
-            await MainActor.run {
-                self?.entries = results
-                self?.logger.info("Library scan: found \(results.count) recordings")
-            }
+        Task { [weak self] in
+            let results = await Task.detached(priority: .userInitiated) {
+                await Self.scanDirectory(directory)
+            }.value
+            self?.entries = results
+            self?.logger.info("Library scan: found \(results.count) recordings")
         }
     }
 
     /// Pure scanning logic — runs off the main thread.
-    nonisolated private static func scanDirectory(_ directory: URL) -> [RecordingEntry] {
+    nonisolated private static func scanDirectory(_ directory: URL) async -> [RecordingEntry] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
             return []
@@ -73,7 +73,7 @@ final class RecordingLibrary: ObservableObject {
         var results: [RecordingEntry] = []
         for fileURL in m4aFiles {
             let date = (try? fileURL.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
-            let duration = getAudioDuration(url: fileURL)
+            let duration = await getAudioDuration(url: fileURL)
             let txtURL = fileURL.deletingPathExtension().appendingPathExtension("txt")
             let jsonURL = fileURL.deletingPathExtension().appendingPathExtension("json")
             let hasTranscript = fm.fileExists(atPath: txtURL.path) || fm.fileExists(atPath: jsonURL.path)
@@ -114,8 +114,9 @@ final class RecordingLibrary: ObservableObject {
         entries.removeAll { $0.id == entry.id }
     }
 
-    nonisolated private static func getAudioDuration(url: URL) -> TimeInterval {
+    nonisolated private static func getAudioDuration(url: URL) async -> TimeInterval {
         let asset = AVURLAsset(url: url)
-        return CMTimeGetSeconds(asset.duration)
+        guard let duration = try? await asset.load(.duration) else { return 0 }
+        return CMTimeGetSeconds(duration)
     }
 }
