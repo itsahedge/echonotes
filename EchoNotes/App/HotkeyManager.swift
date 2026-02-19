@@ -14,8 +14,18 @@ final class HotkeyManager {
     /// The shared instance used by the Carbon callback to route events.
     fileprivate static var shared: HotkeyManager?
 
+    deinit {
+        // Safety net — ensure cleanup even if unregister() wasn't called explicitly
+        if hotkeyRef != nil || eventHandler != nil {
+            unregister()
+        }
+    }
+
     /// Register the global hotkey. Call once at app launch.
     func register(onToggle: @escaping () -> Void) {
+        if HotkeyManager.shared != nil {
+            logger.warning("Overwriting existing HotkeyManager.shared — was unregister() missed?")
+        }
         self.onToggle = onToggle
         HotkeyManager.shared = self
 
@@ -70,7 +80,7 @@ final class HotkeyManager {
         onToggle?()
     }
 
-    private func fourCharCode(_ string: String) -> FourCharCode {
+    func fourCharCode(_ string: String) -> FourCharCode {
         var result: FourCharCode = 0
         for char in string.utf8.prefix(4) {
             result = (result << 8) + FourCharCode(char)

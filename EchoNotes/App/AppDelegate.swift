@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     let recorder = RecordingEngine()
     private let hotkeyManager = HotkeyManager()
+    private var isTogglingRecording = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -19,8 +20,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Register global hotkey ⌘⇧R to toggle recording
         hotkeyManager.register { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isTogglingRecording else { return }
+            self.isTogglingRecording = true
             Task {
+                defer { self.isTogglingRecording = false }
                 if self.recorder.isRecording {
                     await self.recorder.stopRecording()
                 } else {
