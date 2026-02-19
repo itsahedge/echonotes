@@ -193,7 +193,10 @@ struct MenuBarView: View {
                 Image(systemName: "key.fill")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                SecureField("OpenAI API key", text: $tm.openaiAPIKey)
+                SecureField("OpenAI API key", text: Binding(
+                    get: { tm.openaiAPIKey },
+                    set: { tm.openaiAPIKey = $0 }
+                ))
                     .font(.caption)
                     .textFieldStyle(.roundedBorder)
             }

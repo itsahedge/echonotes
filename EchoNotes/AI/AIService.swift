@@ -69,6 +69,7 @@ final class AIService: Sendable {
                 ["role": "system", "content": "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."],
                 ["role": "user", "content": prompt]
             ],
+            "response_format": ["type": "json_object"],
             "temperature": 0.3,
             "max_tokens": 2000
         ]

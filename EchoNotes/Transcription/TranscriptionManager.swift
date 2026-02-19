@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 import os
 
 /// How transcription should be performed.
@@ -27,7 +26,16 @@ final class TranscriptionManager: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: MeetingSummary?
 
-    @AppStorage("openaiAPIKey") var openaiAPIKey: String = ""
+    private static let apiKeyKeychainKey = "openaiAPIKey"
+
+    /// OpenAI API key — stored in Keychain, not UserDefaults.
+    var openaiAPIKey: String {
+        get { KeychainHelper.load(key: Self.apiKeyKeychainKey) ?? "" }
+        set {
+            objectWillChange.send()
+            KeychainHelper.save(key: Self.apiKeyKeychainKey, value: newValue)
+        }
+    }
 
     let modelManager = ModelManager()
     let streamingTranscriber = StreamingTranscriber()
