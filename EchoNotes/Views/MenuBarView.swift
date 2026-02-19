@@ -10,6 +10,7 @@ struct MenuBarView: View {
     weak var delegate: AppDelegate?
 
     @State private var showingLibrary = false
+    @State private var showingSettings = false
     @State private var selectedTranscript: Transcript?
 
     var body: some View {
@@ -26,22 +27,33 @@ struct MenuBarView: View {
                         Circle().fill(.red).frame(width: 8, height: 8)
                         Text("REC").font(.caption).foregroundStyle(.red)
                     }
-                } else if !showingLibrary {
-                    Button(action: {
-                        library.scan()
-                        showingLibrary = true
-                    }) {
-                        Image(systemName: "list.bullet")
-                            .font(.caption)
+                } else if !showingLibrary && !showingSettings {
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            library.scan()
+                            showingLibrary = true
+                        }) {
+                            Image(systemName: "list.bullet")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Recording Library")
+
+                        Button(action: { showingSettings = true }) {
+                            Image(systemName: "gearshape")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Settings")
                     }
-                    .buttonStyle(.plain)
-                    .help("Recording Library")
                 }
             }
 
             Divider()
 
-            if showingLibrary {
+            if showingSettings {
+                SettingsView(tm: tm, onBack: { showingSettings = false })
+            } else if showingLibrary {
                 if let transcript = selectedTranscript {
                     TranscriptDisplayView(transcript: transcript, onNew: {
                         selectedTranscript = nil
@@ -214,20 +226,17 @@ struct MenuBarView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // OpenAI API key for summarization
-            Divider()
-            HStack(spacing: 4) {
-                Image(systemName: "key.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                SecureField("OpenAI API key", text: Binding(
-                    get: { tm.openaiAPIKey },
-                    set: { tm.openaiAPIKey = $0 }
-                ))
-                    .font(.caption)
-                    .textFieldStyle(.roundedBorder)
+            // Hint about AI summaries if key is configured
+            if !tm.openaiAPIKey.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.caption2)
+                        .foregroundStyle(.purple)
+                    Text("AI summaries enabled")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
-            .help("Required for AI meeting summaries")
         }
         .frame(maxHeight: .infinity)
     }
