@@ -5,6 +5,15 @@ struct TranscriptSegment: Codable, Sendable, Equatable {
     let startTime: TimeInterval
     let endTime: TimeInterval
     let text: String
+    /// Speaker label for diarization (e.g. "You", "Them"). Nil for non-diarized transcripts.
+    let speaker: String?
+
+    init(startTime: TimeInterval, endTime: TimeInterval, text: String, speaker: String? = nil) {
+        self.startTime = startTime
+        self.endTime = endTime
+        self.text = text
+        self.speaker = speaker
+    }
 
     /// Text with WhisperKit control tokens stripped out.
     var cleanText: String {
@@ -32,10 +41,16 @@ struct Transcript: Codable, Sendable {
     let createdAt: Date
 
     /// Plain text — all segments joined with spaces, control tokens stripped.
+    /// Includes speaker labels if present.
     func toPlainText() -> String {
-        segments.map { $0.cleanText }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+        segments.compactMap { segment in
+            let text = segment.cleanText
+            guard !text.isEmpty else { return nil }
+            if let speaker = segment.speaker {
+                return "\(speaker): \(text)"
+            }
+            return text
+        }.joined(separator: "\n")
     }
 
     /// Timestamped text with `[MM:SS - MM:SS]` prefixes per segment.
@@ -45,7 +60,8 @@ struct Transcript: Codable, Sendable {
             guard !text.isEmpty else { return nil }
             let start = Self.formatTimestamp(segment.startTime)
             let end = Self.formatTimestamp(segment.endTime)
-            return "[\(start) - \(end)] \(text)"
+            let prefix = segment.speaker.map { "\($0): " } ?? ""
+            return "[\(start) - \(end)] \(prefix)\(text)"
         }.joined(separator: "\n")
     }
 

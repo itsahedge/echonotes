@@ -86,7 +86,7 @@ final class TranscriptionManager: ObservableObject {
 
                 try Task.checkCancellation()
 
-                let segments = try await engine.transcribe(audioURL: audioURL) { [weak self] progress in
+                let segments = try await engine.transcribeDiarized(audioURL: audioURL) { [weak self] progress in
                     Task { @MainActor in
                         self?.progress = progress
                     }
