@@ -6,7 +6,11 @@ struct MenuBarView: View {
     @ObservedObject var recorder: RecordingEngine
     @ObservedObject var tm: TranscriptionManager
     @ObservedObject var modelManager: ModelManager
+    @ObservedObject var library: RecordingLibrary
     weak var delegate: AppDelegate?
+
+    @State private var showingLibrary = false
+    @State private var selectedTranscript: Transcript?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -22,12 +26,35 @@ struct MenuBarView: View {
                         Circle().fill(.red).frame(width: 8, height: 8)
                         Text("REC").font(.caption).foregroundStyle(.red)
                     }
+                } else if !showingLibrary {
+                    Button(action: {
+                        library.scan()
+                        showingLibrary = true
+                    }) {
+                        Image(systemName: "list.bullet")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Recording Library")
                 }
             }
 
             Divider()
 
-            if recorder.isRecording {
+            if showingLibrary {
+                if let transcript = selectedTranscript {
+                    TranscriptDisplayView(transcript: transcript, onNew: {
+                        selectedTranscript = nil
+                    })
+                } else {
+                    LibraryView(library: library, onSelect: { transcript in
+                        selectedTranscript = transcript
+                    }, onBack: {
+                        showingLibrary = false
+                        selectedTranscript = nil
+                    })
+                }
+            } else if recorder.isRecording {
                 recordingView
             } else if tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
                 transcribingView

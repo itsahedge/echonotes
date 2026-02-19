@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
 
     let recorder = RecordingEngine()
+    let library = RecordingLibrary()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -49,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             recorder: recorder,
             tm: recorder.transcriptionManager,
             modelManager: recorder.transcriptionManager.modelManager,
+            library: library,
             delegate: self
         )
         popover.contentViewController = NSHostingController(rootView: view)
