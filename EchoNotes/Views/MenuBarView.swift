@@ -160,6 +160,9 @@ struct MenuBarView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+            Text("⌘⇧R to start recording")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
 
             // Transcription mode picker
             Picker("Transcription", selection: $recorder.transcriptionModeRaw) {

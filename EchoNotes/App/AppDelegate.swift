@@ -9,12 +9,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var eventMonitor: Any?
 
     let recorder = RecordingEngine()
+    private let hotkeyManager = HotkeyManager()
+    private var isTogglingRecording = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         setupStatusItem()
         setupPopover()
         setupEventMonitor()
+
+        // Register global hotkey ⌘⇧R to toggle recording
+        hotkeyManager.register { [weak self] in
+            guard let self, !self.isTogglingRecording else { return }
+            self.isTogglingRecording = true
+            Task {
+                defer { self.isTogglingRecording = false }
+                if self.recorder.isRecording {
+                    await self.recorder.stopRecording()
+                } else {
+                    await self.recorder.startRecording()
+                }
+                self.updateStatusIcon(isRecording: self.recorder.isRecording)
+            }
+        }
 
         // Pre-download Whisper model on first launch if not already cached
         Task {
@@ -82,5 +99,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         removeEventMonitor()
+        hotkeyManager.unregister()
     }
 }
