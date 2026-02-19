@@ -4,6 +4,8 @@ import SwiftUI
 struct TranscriptDisplayView: View {
     let transcript: Transcript
     let onNew: () -> Void
+    var onSummarize: (() -> Void)? = nil
+    var isSummarizing: Bool = false
     
     var body: some View {
         VStack(spacing: 8) {
@@ -32,6 +34,19 @@ struct TranscriptDisplayView: View {
                 }) {
                     Label("Open File", systemImage: "doc.text")
                         .font(.caption)
+                }
+
+                if let onSummarize {
+                    Button(action: onSummarize) {
+                        if isSummarizing {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Label("Summarize", systemImage: "sparkles")
+                                .font(.caption)
+                        }
+                    }
+                    .disabled(isSummarizing)
                 }
 
                 Spacer()

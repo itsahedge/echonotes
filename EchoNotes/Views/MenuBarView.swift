@@ -58,11 +58,17 @@ struct MenuBarView: View {
                 recordingView
             } else if tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
                 transcribingView
+            } else if let summary = tm.summary, let transcript = tm.transcript {
+                SummaryView(summary: summary, recordingURL: transcript.recordingURL, onBack: {
+                    tm.summary = nil
+                })
             } else if let transcript = tm.transcript {
                 TranscriptDisplayView(transcript: transcript, onNew: {
                     tm.reset()
                     recorder.lastRecordingURL = nil
-                })
+                }, onSummarize: tm.openaiAPIKey.isEmpty ? nil : {
+                    Task { await tm.summarize() }
+                }, isSummarizing: tm.isSummarizing)
             } else if recorder.lastRecordingURL != nil {
                 readyToTranscribeView
             } else {
@@ -207,6 +213,21 @@ struct MenuBarView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // OpenAI API key for summarization
+            Divider()
+            HStack(spacing: 4) {
+                Image(systemName: "key.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                SecureField("OpenAI API key", text: Binding(
+                    get: { tm.openaiAPIKey },
+                    set: { tm.openaiAPIKey = $0 }
+                ))
+                    .font(.caption)
+                    .textFieldStyle(.roundedBorder)
+            }
+            .help("Required for AI meeting summaries")
         }
         .frame(maxHeight: .infinity)
     }

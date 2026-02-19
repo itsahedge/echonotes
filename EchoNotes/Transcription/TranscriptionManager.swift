@@ -23,6 +23,19 @@ final class TranscriptionManager: ObservableObject {
     @Published var progress: Double = 0
     @Published var transcript: Transcript?
     @Published var error: String?
+    @Published var isSummarizing = false
+    @Published var summary: MeetingSummary?
+
+    private static let apiKeyKeychainKey = "openaiAPIKey"
+
+    /// OpenAI API key — stored in Keychain, not UserDefaults.
+    var openaiAPIKey: String {
+        get { KeychainHelper.load(key: Self.apiKeyKeychainKey) ?? "" }
+        set {
+            objectWillChange.send()
+            KeychainHelper.save(key: Self.apiKeyKeychainKey, value: newValue)
+        }
+    }
 
     let modelManager = ModelManager()
     let streamingTranscriber = StreamingTranscriber()
@@ -123,6 +136,35 @@ final class TranscriptionManager: ObservableObject {
         await task.value
     }
 
+    /// Summarize the current transcript using OpenAI.
+    func summarize() async {
+        guard let transcript else { return }
+        guard !openaiAPIKey.isEmpty else {
+            error = AIError.noAPIKey.localizedDescription
+            return
+        }
+
+        isSummarizing = true
+        error = nil
+        summary = nil
+
+        do {
+            let config = AIService.Configuration(apiKey: openaiAPIKey)
+            let service = AIService()
+            let result = try await service.summarize(transcript: transcript.toPlainText(), config: config)
+
+            // Save as .md alongside the recording
+            let mdURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("md")
+            try result.toMarkdown().write(to: mdURL, atomically: true, encoding: .utf8)
+
+            self.summary = result
+        } catch {
+            self.error = error.localizedDescription
+        }
+
+        isSummarizing = false
+    }
+
     /// Reset state for a new transcription.
     func reset() {
         transcriptionTask?.cancel()
@@ -130,5 +172,6 @@ final class TranscriptionManager: ObservableObject {
         transcript = nil
         error = nil
         progress = 0
+        summary = nil
     }
 }
