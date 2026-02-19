@@ -165,10 +165,17 @@ struct MenuBarView: View {
                             // Only show the last 50 segments for performance
                             // Full array is preserved in StreamingTranscriber.segments for final transcript
                             ForEach(Array(recentSegments.enumerated()), id: \.offset) { idx, segment in
-                                Text(segment.cleanText)
-                                    .font(.caption)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .id(idx)
+                                HStack(alignment: .top, spacing: 4) {
+                                    if let speaker = segment.speaker {
+                                        Text(speaker)
+                                            .font(.caption2.bold())
+                                            .foregroundStyle(Speaker(rawValue: speaker)?.color ?? .primary)
+                                    }
+                                    Text(segment.cleanText)
+                                        .font(.caption)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .id(idx)
                             }
                         }
                     }

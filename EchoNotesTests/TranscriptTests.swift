@@ -113,4 +113,102 @@ struct TranscriptTests {
         #expect(a == b)
         #expect(a != c)
     }
+
+    // MARK: - Diarization Tests
+
+    @Test("Plain text includes speaker labels when present")
+    func plainTextWithSpeakers() {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 10, text: "Hello there", speaker: Speaker.user.rawValue),
+            TranscriptSegment(startTime: 10, endTime: 20, text: "Hi, how are you?", speaker: Speaker.remote.rawValue),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let text = transcript.toPlainText()
+        #expect(text.contains("You: Hello there"))
+        #expect(text.contains("Them: Hi, how are you?"))
+    }
+
+    @Test("Plain text uses newlines with speaker labels")
+    func plainTextSpeakerSeparator() {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 10, text: "Line one", speaker: "You"),
+            TranscriptSegment(startTime: 10, endTime: 20, text: "Line two", speaker: "Them"),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let text = transcript.toPlainText()
+        #expect(text == "You: Line one\nThem: Line two")
+    }
+
+    @Test("Plain text without speaker labels still works")
+    func plainTextNoSpeakers() {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 10, text: "Just text"),
+            TranscriptSegment(startTime: 10, endTime: 20, text: "More text"),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let text = transcript.toPlainText()
+        #expect(text == "Just text\nMore text")
+    }
+
+    @Test("Timestamped text includes speaker prefix")
+    func timestampedTextWithSpeakers() {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 15, text: "Hello", speaker: Speaker.user.rawValue),
+            TranscriptSegment(startTime: 15, endTime: 30, text: "World", speaker: Speaker.remote.rawValue),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let text = transcript.toTimestampedText()
+        #expect(text.contains("[00:00 - 00:15] You: Hello"))
+        #expect(text.contains("[00:15 - 00:30] Them: World"))
+    }
+
+    @Test("Timestamped text without speakers has no prefix")
+    func timestampedTextNoSpeakers() {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 15, text: "Hello"),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let text = transcript.toTimestampedText()
+        #expect(text == "[00:00 - 00:15] Hello")
+    }
+
+    @Test("Speaker enum raw values match expected strings")
+    func speakerRawValues() {
+        #expect(Speaker.user.rawValue == "You")
+        #expect(Speaker.remote.rawValue == "Them")
+    }
+
+    @Test("Speaker init from raw value works")
+    func speakerFromRaw() {
+        #expect(Speaker(rawValue: "You") == .user)
+        #expect(Speaker(rawValue: "Them") == .remote)
+        #expect(Speaker(rawValue: "Unknown") == nil)
+    }
+
+    @Test("JSON round-trip preserves speaker labels")
+    func jsonRoundTripWithSpeakers() throws {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 10, text: "Hello", speaker: "You"),
+            TranscriptSegment(startTime: 10, endTime: 20, text: "Hi", speaker: "Them"),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let json = try transcript.toJSON()
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(Transcript.self, from: json)
+        #expect(decoded.segments[0].speaker == "You")
+        #expect(decoded.segments[1].speaker == "Them")
+    }
+
+    @Test("Empty segments are filtered from plain text")
+    func emptySegmentsFiltered() {
+        let segments = [
+            TranscriptSegment(startTime: 0, endTime: 5, text: "Hello", speaker: "You"),
+            TranscriptSegment(startTime: 5, endTime: 10, text: "   ", speaker: "Them"),
+            TranscriptSegment(startTime: 10, endTime: 15, text: "World", speaker: "You"),
+        ]
+        let transcript = makeTranscript(segments: segments)
+        let text = transcript.toPlainText()
+        #expect(text == "You: Hello\nYou: World")
+    }
 }
