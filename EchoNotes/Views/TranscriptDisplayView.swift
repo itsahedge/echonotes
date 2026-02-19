@@ -27,12 +27,11 @@ struct TranscriptDisplayView: View {
             // Speaker legend
             if hasSpeakers {
                 HStack(spacing: 12) {
-                    Label("You", systemImage: "person.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.blue)
-                    Label("Them", systemImage: "person.2.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
+                    ForEach([Speaker.user, .remote], id: \.rawValue) { speaker in
+                        Label(speaker.rawValue, systemImage: speaker.icon)
+                            .font(.caption2)
+                            .foregroundStyle(speaker.color)
+                    }
                 }
             }
 
@@ -74,7 +73,7 @@ struct TranscriptDisplayView: View {
                         if let speaker = segment.speaker {
                             Text(speaker)
                                 .font(.caption2.bold())
-                                .foregroundStyle(speaker == "You" ? .blue : .green)
+                                .foregroundStyle(Speaker(rawValue: speaker)?.color ?? .primary)
                                 .frame(width: 36, alignment: .trailing)
                         }
                         Text(text)

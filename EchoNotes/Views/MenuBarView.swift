@@ -124,7 +124,7 @@ struct MenuBarView: View {
                                     if let speaker = segment.speaker {
                                         Text(speaker)
                                             .font(.caption2.bold())
-                                            .foregroundStyle(speaker == "You" ? .blue : .green)
+                                            .foregroundStyle(Speaker(rawValue: speaker)?.color ?? .primary)
                                     }
                                     Text(segment.cleanText)
                                         .font(.caption)

@@ -44,31 +44,41 @@ final class WhisperEngine: @unchecked Sendable {
         return mapResults(result, speaker: speaker)
     }
 
+    /// Minimum RMS amplitude to consider a channel non-silent.
+    /// Below this threshold, the channel is treated as empty (no speech).
+    static let silenceThreshold: Float = 0.001
+
     /// Transcribe a stereo file with speaker diarization.
-    /// Left channel = system audio ("Them"), right channel = mic ("You").
-    /// Transcribes each channel independently and merges chronologically.
+    /// Left channel = system audio (remote), right channel = mic (user).
+    /// Falls back to non-diarized transcription for mono files.
     func transcribeDiarized(
         audioURL: URL,
         progressCallback: (@Sendable (Double) -> Void)? = nil
     ) async throws -> [TranscriptSegment] {
         logger.info("Starting diarized transcription of \(audioURL.lastPathComponent)")
 
+        // Fall back to standard transcription for mono files
+        guard Self.isStereo(url: audioURL) else {
+            logger.info("Mono file detected — falling back to non-diarized transcription")
+            return try await transcribe(audioURL: audioURL, progressCallback: progressCallback)
+        }
+
         let (systemSamples, micSamples) = try Self.splitChannels(url: audioURL)
         logger.info("Split channels: system=\(systemSamples.count) mic=\(micSamples.count) samples")
 
-        // Transcribe system audio (left channel = "Them") — 0-50% progress
+        // Transcribe system audio (left channel = remote speaker) — 0-50% progress
         let systemSegments: [TranscriptSegment]
-        if systemSamples.contains(where: { abs($0) > 0.001 }) {
-            systemSegments = try await transcribeSamples(systemSamples, speaker: "Them")
+        if systemSamples.contains(where: { abs($0) > Self.silenceThreshold }) {
+            systemSegments = try await transcribeSamples(systemSamples, speaker: Speaker.remote.rawValue)
         } else {
             systemSegments = []
         }
         progressCallback?(0.5)
 
-        // Transcribe mic audio (right channel = "You") — 50-100% progress
+        // Transcribe mic audio (right channel = user) — 50-100% progress
         let micSegments: [TranscriptSegment]
-        if micSamples.contains(where: { abs($0) > 0.001 }) {
-            micSegments = try await transcribeSamples(micSamples, speaker: "You")
+        if micSamples.contains(where: { abs($0) > Self.silenceThreshold }) {
+            micSegments = try await transcribeSamples(micSamples, speaker: Speaker.user.rawValue)
         } else {
             micSegments = []
         }
@@ -78,6 +88,12 @@ final class WhisperEngine: @unchecked Sendable {
         let merged = (systemSegments + micSegments).sorted { $0.startTime < $1.startTime }
         logger.info("Diarized transcription complete: \(merged.count) segments")
         return merged
+    }
+
+    /// Check if an audio file has 2+ channels without reading the full file.
+    nonisolated static func isStereo(url: URL) -> Bool {
+        guard let file = try? AVAudioFile(forReading: url) else { return false }
+        return file.processingFormat.channelCount >= 2
     }
 
     /// Split a stereo audio file into two mono Float32 arrays at 16kHz.

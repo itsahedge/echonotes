@@ -126,7 +126,7 @@ final class StreamingTranscriber: ObservableObject {
             do {
                 let resampled = try resample(chunk)
                 guard let engine = whisperEngine else { return }
-                let newSegments = try await engine.transcribeSamples(resampled, speaker: "Them")
+                let newSegments = try await engine.transcribeSamples(resampled, speaker: Speaker.remote.rawValue)
 
                 segments.append(contentsOf: newSegments.map {
                     TranscriptSegment(
@@ -159,7 +159,7 @@ final class StreamingTranscriber: ObservableObject {
                 do {
                     let resampled = try resample(queued)
                     guard let engine = whisperEngine else { break }
-                    let newSegments = try await engine.transcribeSamples(resampled, speaker: "Them")
+                    let newSegments = try await engine.transcribeSamples(resampled, speaker: Speaker.remote.rawValue)
 
                     segments.append(contentsOf: newSegments.map {
                         TranscriptSegment(
