@@ -8,7 +8,10 @@ struct RecordingEntry: Identifiable, Sendable {
     let url: URL
     let date: Date
     let duration: TimeInterval
+    /// First ~150 chars of transcript for display in list rows.
     let transcriptPreview: String?
+    /// Full transcript text for search. Not displayed directly.
+    let fullTranscriptText: String?
     let hasTranscript: Bool
 
     var filename: String { url.lastPathComponent }
@@ -37,7 +40,7 @@ final class RecordingLibrary: ObservableObject {
         let query = searchQuery.lowercased()
         return entries.filter { entry in
             entry.filename.lowercased().contains(query) ||
-            (entry.transcriptPreview?.lowercased().contains(query) ?? false)
+            (entry.fullTranscriptText?.lowercased().contains(query) ?? false)
         }
     }
 
@@ -46,11 +49,23 @@ final class RecordingLibrary: ObservableObject {
         return docs.appendingPathComponent("EchoNotes", isDirectory: true)
     }
 
+    /// Scan the recordings directory for entries. File I/O runs on a background thread.
     func scan() {
+        let directory = saveDirectory
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let results = Self.scanDirectory(directory)
+            await MainActor.run {
+                self?.entries = results
+                self?.logger.info("Library scan: found \(results.count) recordings")
+            }
+        }
+    }
+
+    /// Pure scanning logic — runs off the main thread.
+    nonisolated private static func scanDirectory(_ directory: URL) -> [RecordingEntry] {
         let fm = FileManager.default
-        guard let files = try? fm.contentsOfDirectory(at: saveDirectory, includingPropertiesForKeys: [.creationDateKey]) else {
-            entries = []
-            return
+        guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
+            return []
         }
 
         let m4aFiles = files.filter { $0.pathExtension.lowercased() == "m4a" }
@@ -58,13 +73,15 @@ final class RecordingLibrary: ObservableObject {
         var results: [RecordingEntry] = []
         for fileURL in m4aFiles {
             let date = (try? fileURL.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
-            let duration = Self.getAudioDuration(url: fileURL)
+            let duration = getAudioDuration(url: fileURL)
             let txtURL = fileURL.deletingPathExtension().appendingPathExtension("txt")
             let jsonURL = fileURL.deletingPathExtension().appendingPathExtension("json")
             let hasTranscript = fm.fileExists(atPath: txtURL.path) || fm.fileExists(atPath: jsonURL.path)
 
+            var fullText: String?
             var preview: String?
             if let text = try? String(contentsOf: txtURL, encoding: .utf8) {
+                fullText = text
                 preview = String(text.prefix(150)).trimmingCharacters(in: .whitespacesAndNewlines)
             }
 
@@ -74,12 +91,12 @@ final class RecordingLibrary: ObservableObject {
                 date: date,
                 duration: duration,
                 transcriptPreview: preview,
+                fullTranscriptText: fullText,
                 hasTranscript: hasTranscript
             ))
         }
 
-        entries = results.sorted { $0.date > $1.date }
-        logger.info("Library scan: found \(results.count) recordings")
+        return results.sorted { $0.date > $1.date }
     }
 
     func delete(_ entry: RecordingEntry) {
