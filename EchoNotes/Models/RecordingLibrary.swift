@@ -16,15 +16,34 @@ struct RecordingEntry: Identifiable, Sendable {
 
     var filename: String { url.lastPathComponent }
 
-    /// Load a Transcript from the associated .json file, if it exists.
+    /// Load a Transcript from the associated .json file, falling back to .txt if needed.
     func loadTranscript() -> Transcript? {
+        // Try structured JSON first
         let jsonURL = url.deletingPathExtension().appendingPathExtension("json")
-        guard FileManager.default.fileExists(atPath: jsonURL.path),
-              let data = try? Data(contentsOf: jsonURL),
-              let transcript = try? JSONDecoder().decode(Transcript.self, from: data) else {
-            return nil
+        if FileManager.default.fileExists(atPath: jsonURL.path),
+           let data = try? Data(contentsOf: jsonURL) {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            if let transcript = try? decoder.decode(Transcript.self, from: data) {
+                return transcript
+            }
         }
-        return transcript
+
+        // Fall back to plain .txt file
+        let txtURL = url.deletingPathExtension().appendingPathExtension("txt")
+        if FileManager.default.fileExists(atPath: txtURL.path),
+           let text = try? String(contentsOf: txtURL, encoding: .utf8),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Create a simple transcript with the full text as one segment
+            let segment = TranscriptSegment(startTime: 0, endTime: duration, text: text)
+            return Transcript(
+                date: date,
+                segments: [segment],
+                recordingURL: url
+            )
+        }
+
+        return nil
     }
 }
 
