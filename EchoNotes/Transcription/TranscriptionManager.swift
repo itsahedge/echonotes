@@ -26,12 +26,49 @@ final class TranscriptionManager: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: MeetingSummary?
 
-    private static let apiKeyDefaultsKey = "openaiAPIKey"
+    // MARK: - AI Provider Settings
 
-    /// OpenAI API key — stored in UserDefaults, synced via @Published for SwiftUI.
-    /// Note: @AppStorage inside ObservableObject causes re-render loops. Use @Published + manual sync.
+    private static let apiKeyDefaultsKey = "openaiAPIKey"
+    private static let providerDefaultsKey = "aiProvider"
+    private static let aiModelDefaultsKey = "aiModel"
+
+    /// API key for the selected AI provider.
     @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(openaiAPIKey, forKey: Self.apiKeyDefaultsKey) }
+    }
+
+    /// Selected AI provider for summarization.
+    @Published var selectedProvider: AIProvider = {
+        if let raw = UserDefaults.standard.string(forKey: providerDefaultsKey),
+           let provider = AIProvider(rawValue: raw) {
+            return provider
+        }
+        return .openai
+    }() {
+        didSet { UserDefaults.standard.set(selectedProvider.rawValue, forKey: Self.providerDefaultsKey) }
+    }
+
+    /// Selected model for AI summarization.
+    @Published var selectedAIModel: String = UserDefaults.standard.string(forKey: aiModelDefaultsKey) ?? AIProvider.openai.defaultModel {
+        didSet { UserDefaults.standard.set(selectedAIModel, forKey: Self.aiModelDefaultsKey) }
+    }
+
+    /// Whether the current provider is configured and ready to use.
+    var isAIConfigured: Bool {
+        if selectedProvider.requiresAPIKey {
+            return !openaiAPIKey.isEmpty
+        }
+        return true // Ollama doesn't need a key
+    }
+
+    /// Build an AIService.Configuration from current settings.
+    func aiConfiguration() -> AIService.Configuration {
+        AIService.Configuration(
+            apiKey: openaiAPIKey,
+            model: selectedAIModel,
+            endpoint: URL(string: selectedProvider.defaultEndpoint)!,
+            provider: selectedProvider
+        )
     }
 
     let modelManager = ModelManager()
@@ -133,10 +170,10 @@ final class TranscriptionManager: ObservableObject {
         await task.value
     }
 
-    /// Summarize the current transcript using OpenAI.
+    /// Summarize the current transcript using the configured AI provider.
     func summarize() async {
         guard let transcript else { return }
-        guard !openaiAPIKey.isEmpty else {
+        guard isAIConfigured else {
             error = AIError.noAPIKey.localizedDescription
             return
         }
@@ -146,7 +183,7 @@ final class TranscriptionManager: ObservableObject {
         summary = nil
 
         do {
-            let config = AIService.Configuration(apiKey: openaiAPIKey)
+            let config = aiConfiguration()
             let service = AIService()
             let result = try await service.summarize(transcript: transcript.toPlainText(), config: config)
 

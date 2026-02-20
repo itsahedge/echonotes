@@ -78,7 +78,7 @@ struct MenuBarView: View {
                 TranscriptDisplayView(transcript: transcript, onNew: {
                     tm.reset()
                     recorder.lastRecordingURL = nil
-                }, onSummarize: tm.openaiAPIKey.isEmpty ? nil : {
+                }, onSummarize: !tm.isAIConfigured ? nil : {
                     Task { await tm.summarize() }
                 }, isSummarizing: tm.isSummarizing)
             } else if recorder.lastRecordingURL != nil {
@@ -117,8 +117,8 @@ struct MenuBarView: View {
             }
         }
         .padding()
-        .frame(width: 340)
-        .frame(minHeight: 300, maxHeight: 560)
+        .frame(width: 400)
+        .frame(minHeight: 360, maxHeight: 640)
     }
 
     // MARK: - State Views
@@ -236,7 +236,7 @@ struct MenuBarView: View {
             }
 
             // Hint about AI summaries if key is configured
-            if !tm.openaiAPIKey.isEmpty {
+            if tm.isAIConfigured {
                 HStack(spacing: 4) {
                     Image(systemName: "sparkles")
                         .font(.caption2)
