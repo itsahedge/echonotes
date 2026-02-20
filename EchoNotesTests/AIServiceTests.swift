@@ -177,6 +177,38 @@ struct AIServiceTests {
         #expect(md.contains("- [ ] Do thing"))
     }
 
+    // MARK: - MeetingSummary Persistence
+
+    @Test("MeetingSummary JSON round-trip preserves all fields")
+    func summaryJSONRoundTrip() throws {
+        let original = MeetingSummary(
+            summary: "Discussed Q1 goals",
+            actionItems: ["Ship feature A", "Hire designer"],
+            keyDecisions: ["Use SwiftUI", "Monthly releases"],
+            openQuestions: ["Budget for Q2?"]
+        )
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(MeetingSummary.self, from: encoded)
+        #expect(decoded.summary == original.summary)
+        #expect(decoded.actionItems == original.actionItems)
+        #expect(decoded.keyDecisions == original.keyDecisions)
+        #expect(decoded.openQuestions == original.openQuestions)
+    }
+
+    @Test("MeetingSummary JSON round-trip with empty arrays")
+    func summaryJSONRoundTripEmpty() throws {
+        let original = MeetingSummary(
+            summary: "Brief chat",
+            actionItems: [],
+            keyDecisions: [],
+            openQuestions: []
+        )
+        let encoded = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(MeetingSummary.self, from: encoded)
+        #expect(decoded.summary == "Brief chat")
+        #expect(decoded.actionItems.isEmpty)
+    }
+
     // MARK: - AIError
 
     @Test("AIError descriptions are user-friendly")
