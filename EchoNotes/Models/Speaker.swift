@@ -8,8 +8,8 @@ enum Speaker: String, Codable, Sendable {
     /// Display color for speaker labels in the UI.
     var color: Color {
         switch self {
-        case .user: .blue
-        case .remote: .green
+        case .user: .purple
+        case .remote: .indigo
         }
     }
 

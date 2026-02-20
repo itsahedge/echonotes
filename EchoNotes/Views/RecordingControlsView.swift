@@ -26,7 +26,7 @@ struct RecordingControlsView: View {
                     .padding(.vertical, 8)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(recorder.isRecording ? .red : .accentColor)
+                .tint(recorder.isRecording ? .red : .purple)
             }
         }
     }

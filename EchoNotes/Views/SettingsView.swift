@@ -81,7 +81,7 @@ struct SettingsView: View {
                             if !tm.openaiAPIKey.isEmpty {
                                 Label("Active", systemImage: "checkmark.circle.fill")
                                     .font(.caption2)
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(.purple)
                             }
                         }
                     }
