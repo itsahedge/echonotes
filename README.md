@@ -1,8 +1,8 @@
 # EchoNotes
 
-> Record and transcribe calls on macOS. Any app. No bots. No cloud. Just audio.
+> Private meeting transcription for Mac. No bots. No cloud. No subscriptions.
 
-EchoNotes is a native macOS menu bar app that records audio from **any** call — Zoom, Google Meet, FaceTime, Discord, phone calls, whatever — and transcribes it locally using [WhisperKit](https://github.com/argmaxinc/WhisperKit).
+EchoNotes is a native macOS menu bar app that records audio from **any** call — Zoom, Google Meet, FaceTime, Discord, phone calls, whatever — and transcribes it locally using [WhisperKit](https://github.com/argmaxinc/WhisperKit). Optionally generate AI-powered meeting summaries with your existing ChatGPT subscription or any API key.
 
 **🎤 AUDIO-ONLY APP** — We capture system audio output (other people on calls) and microphone input (your voice). No video, screen recording, or visual data whatsoever.
 
@@ -11,8 +11,14 @@ EchoNotes is a native macOS menu bar app that records audio from **any** call �
 - **Universal recording** — works with any app that plays audio through your system
 - **Live transcription** — see text appear in ~5-second intervals while you record
 - **Post-recording transcription** — transcribe the full audio after you stop for higher accuracy
-- **100% local** — all processing happens on-device via Apple's Neural Engine. No internet needed after model download.
-- **Free** — no API keys, no accounts, no usage limits
+- **Speaker diarization** — distinguish between different speakers in the transcript
+- **Recording library** — browse, search, and manage all your recordings with full-text search
+- **AI summaries** — generate structured meeting summaries (key points, action items, decisions)
+- **Multi-provider AI** — OpenAI, Anthropic, Google Gemini, or local Ollama
+- **ChatGPT OAuth** — sign in with your existing ChatGPT Plus/Pro subscription (no API key needed)
+- **Global hotkey** — start/stop recording with ⌘⇧R from anywhere
+- **100% local transcription** — all speech-to-text happens on-device via Apple's Neural Engine
+- **Free** — no accounts or usage limits for recording and transcription
 
 ## How It Works
 
@@ -25,6 +31,11 @@ AVAudioEngine (microphone)      ──→ Right channel ──┘
                                                          │
                                                     Transcript
                                                   (.txt + .json)
+                                                         │
+                                              AI Provider (optional)
+                                                         │
+                                                 Meeting Summary
+                                          (key points, actions, decisions)
 ```
 
 ## Requirements
@@ -39,13 +50,21 @@ git clone <repo>
 cd echonotes
 ```
 
-### Run from Xcode (recommended)
+### Build as macOS App (recommended)
+
+```bash
+./scripts/build-app.sh
+```
+
+This creates `EchoNotes.app` in the project root. Drag it to `/Applications` to install.
+
+### Run from Xcode
 
 ```bash
 open Package.swift
 ```
 
-Then press **⌘R** to build and run. The app will appear as a waveform icon in your menu bar.
+Press **⌘R** to build and run. The app appears as a waveform icon in your menu bar.
 
 ### Run from command line
 
@@ -54,22 +73,7 @@ swift build
 .build/debug/EchoNotes
 ```
 
-### Build as macOS App
-
-```bash
-./scripts/build-app.sh
-```
-
-This creates `EchoNotes.app` in the project root. Drag it to `/Applications` to install.
-
-### Build a standalone binary
-
-```bash
-swift build -c release
-# Binary at: .build/release/EchoNotes
-```
-
-On first launch, the app will download a Whisper model (~150MB for Base English). This only happens once — the model is cached locally for future use.
+On first launch, the app downloads a Whisper model (~150MB for Base English). This only happens once.
 
 ### Permissions
 
@@ -84,55 +88,89 @@ macOS will ask for:
 1. Click the waveform icon in your menu bar
 2. Choose transcription mode: **Live** or **After Recording**
 3. Start a call in any app
-4. Click **Start Recording**
+4. Click **Start Recording** (or press **⌘⇧R**)
 5. Click **Stop Recording** when done
 6. Your M4A + transcript are saved to `~/Documents/EchoNotes/`
+7. Open the recording detail view to generate an AI summary
 
-## Transcription Modes
+## AI Summarization
 
-| Mode | How it works | Best for |
-|------|-------------|----------|
-| **Live** | Transcribes in ~5s chunks during recording | Seeing text as you talk |
-| **After Recording** | Transcribes the full file after you stop | Higher accuracy |
+EchoNotes can generate structured meeting summaries from your transcripts. Configure in **Settings**:
+
+### Option 1: ChatGPT Sign-In (no API key needed)
+Click **Sign in with ChatGPT** to use your existing Plus/Pro subscription. Uses OAuth 2.1 + PKCE to authenticate, then calls the ChatGPT backend Responses API directly.
+
+### Option 2: API Key
+Paste an API key for any supported provider:
+- **OpenAI** — `api.openai.com`
+- **Anthropic** — Claude models
+- **Google Gemini** — Gemini models
+- **Ollama** — local models (no key needed)
 
 ## Project Structure
 
 ```
 EchoNotes/
+├── AI/
+│   ├── AIProvider.swift             # Multi-provider config (OpenAI, Anthropic, Google, Ollama)
+│   └── AIService.swift              # Summarization logic + ChatGPT backend streaming
 ├── App/
-│   ├── EchoNotesApp.swift          # Entry point (menu bar only)
-│   ├── AppDelegate.swift           # Status item + popover
-│   └── RecordingEngine.swift       # Coordinates capture + writing + transcription
+│   ├── EchoNotesApp.swift           # Entry point (menu bar only)
+│   ├── AppDelegate.swift            # Status item + popover
+│   └── RecordingEngine.swift        # Coordinates capture + writing + transcription
 ├── Audio/
-│   ├── SystemAudioCapture.swift    # ScreenCaptureKit (audio-only)
-│   ├── MicrophoneCapture.swift     # AVAudioEngine mic input
-│   └── AudioFileWriter.swift       # Stereo M4A output
-├── Transcription/
-│   ├── WhisperEngine.swift         # WhisperKit wrapper
-│   ├── StreamingTranscriber.swift  # Live transcription (5s chunks)
-│   ├── TranscriptionManager.swift  # Orchestrates transcription pipeline
-│   └── ModelManager.swift          # Model loading + caching
+│   ├── SystemAudioCapture.swift     # ScreenCaptureKit (audio-only)
+│   ├── MicrophoneCapture.swift      # AVAudioEngine mic input
+│   └── AudioFileWriter.swift        # Stereo M4A output
+├── Auth/
+│   ├── OAuthManager.swift           # OAuth 2.1 + PKCE flow, JWT parsing, token storage
+│   └── OAuthCallbackServer.swift    # Local HTTP server for OAuth redirect
 ├── Models/
-│   └── Transcript.swift            # Segment model + export (.txt, .json)
+│   ├── Recording.swift              # Recording model + library management
+│   ├── Speaker.swift                # Speaker enum for diarization
+│   └── Transcript.swift             # Segment model + export (.txt, .json)
+├── Transcription/
+│   ├── WhisperEngine.swift          # WhisperKit wrapper
+│   ├── StreamingTranscriber.swift   # Live transcription (5s chunks)
+│   ├── TranscriptionManager.swift   # Orchestrates transcription + AI config + OAuth state
+│   └── ModelManager.swift           # Model loading + caching
 ├── Views/
-│   ├── MenuBarView.swift           # Main popover UI
-│   ├── RecordingControlsView.swift # Start/stop button
-│   ├── TranscriptDisplayView.swift # Completed transcript display
-│   └── LevelMeterView.swift        # Audio level visualization
-└── Utils/
-    ├── Constants.swift             # Audio configuration
-    └── Permissions.swift           # Mic + screen recording checks
+│   ├── MenuBarView.swift            # Main popover UI
+│   ├── LibraryView.swift            # Recording library with search
+│   ├── RecordingDetailView.swift    # Transcript + AI summary view
+│   ├── SettingsView.swift           # AI provider config + OAuth sign-in
+│   ├── RecordingControlsView.swift  # Start/stop button
+│   ├── SummaryView.swift            # Meeting summary display
+│   ├── TranscriptDisplayView.swift  # Completed transcript display
+│   └── LevelMeterView.swift         # Audio level visualization
+├── Utils/
+│   ├── Constants.swift              # Audio configuration
+│   └── Permissions.swift            # Mic + screen recording checks
+├── scripts/
+│   └── build-app.sh                 # Build release app bundle
+├── research/
+│   └── competitive-analysis.md      # Market research
+├── CLAUDE.md                        # AI coding assistant rules
+├── CONTRIBUTING.md                  # Build + test requirements for PRs
+└── EchoNotesTests/                  # ~90 tests across 10 files
 ```
-
-~1,770 lines of Swift + ~400 lines of tests. One dependency: [WhisperKit](https://github.com/argmaxinc/WhisperKit).
 
 ## Tech Stack
 
-- **Swift / SwiftUI** — native macOS, menu bar app
+- **Swift / SwiftUI** — native macOS, menu bar app (`LSUIElement`)
+- **SwiftPM** — package management (no Xcode project file needed)
 - **ScreenCaptureKit** — system audio capture (audio-only mode)
 - **AVAudioEngine** — microphone capture
 - **WhisperKit** — on-device speech-to-text via CoreML + Apple Neural Engine
+- **Network.framework** — OAuth callback server (NWListener)
 - **AAC/M4A** — compressed audio output
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Every PR must:
+1. Pass `./scripts/build-app.sh`
+2. Include tests for new functionality
+3. Use feature branches (never push directly to main)
 
 ## License
 
