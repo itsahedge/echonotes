@@ -28,13 +28,13 @@ final class TranscriptionManager: ObservableObject {
 
     private static let apiKeyKeychainKey = "openaiAPIKey"
 
-    /// OpenAI API key — stored in Keychain, not UserDefaults.
-    var openaiAPIKey: String {
-        get { KeychainHelper.load(key: Self.apiKeyKeychainKey) ?? "" }
-        set {
-            objectWillChange.send()
-            KeychainHelper.save(key: Self.apiKeyKeychainKey, value: newValue)
-        }
+    /// OpenAI API key — stored in Keychain, with a @Published shadow for SwiftUI reactivity.
+    @Published private(set) var openaiAPIKey: String = KeychainHelper.load(key: apiKeyKeychainKey) ?? ""
+
+    /// Update the API key in both Keychain and the published shadow property.
+    func setOpenAIAPIKey(_ newValue: String) {
+        KeychainHelper.save(key: Self.apiKeyKeychainKey, value: newValue)
+        openaiAPIKey = newValue
     }
 
     let modelManager = ModelManager()
