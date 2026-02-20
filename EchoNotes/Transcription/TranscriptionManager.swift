@@ -67,8 +67,8 @@ final class TranscriptionManager: ObservableObject {
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
-        // If using OpenAI with OAuth token, check that
-        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, tokens.apiKey != nil {
+        // If using OpenAI with OAuth, check for either API key or access token
+        if selectedProvider == .openai, oauthManager.isAuthenticated {
             return true
         }
         if selectedProvider.requiresAPIKey {
@@ -79,14 +79,30 @@ final class TranscriptionManager: ObservableObject {
 
     /// Build an AIService.Configuration from current settings.
     func aiConfiguration() -> AIService.Configuration {
-        // Prefer OAuth API key for OpenAI if available
-        var apiKey = openaiAPIKey
-        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, let oauthKey = tokens.apiKey {
-            apiKey = oauthKey
+        // Prefer OAuth for OpenAI if available
+        if selectedProvider == .openai, let tokens = oauthManager.storedTokens {
+            if let apiKey = tokens.apiKey {
+                // Has platform API key — use standard OpenAI endpoint
+                return AIService.Configuration(
+                    apiKey: apiKey,
+                    model: selectedAIModel,
+                    endpoint: URL(string: selectedProvider.defaultEndpoint)!,
+                    provider: selectedProvider
+                )
+            } else {
+                // No API key — use access token against ChatGPT backend
+                return AIService.Configuration(
+                    apiKey: tokens.accessToken,
+                    model: "gpt-4o",
+                    endpoint: URL(string: "https://chatgpt.com/backend-api/v1/chat/completions")!,
+                    provider: selectedProvider,
+                    chatgptAccountId: tokens.accountId
+                )
+            }
         }
 
         return AIService.Configuration(
-            apiKey: apiKey,
+            apiKey: openaiAPIKey,
             model: selectedAIModel,
             endpoint: URL(string: selectedProvider.defaultEndpoint)!,
             provider: selectedProvider

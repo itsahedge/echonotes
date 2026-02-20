@@ -37,12 +37,14 @@ final class AIService: Sendable {
         let model: String
         let endpoint: URL
         let provider: AIProvider
+        let chatgptAccountId: String?
 
-        init(apiKey: String, model: String = "gpt-4o-mini", endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!, provider: AIProvider = .openai) {
+        init(apiKey: String, model: String = "gpt-4o-mini", endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!, provider: AIProvider = .openai, chatgptAccountId: String? = nil) {
             self.apiKey = apiKey
             self.model = model
             self.endpoint = endpoint
             self.provider = provider
+            self.chatgptAccountId = chatgptAccountId
         }
     }
 
@@ -83,6 +85,9 @@ final class AIService: Sendable {
         request.httpMethod = "POST"
         request.setValue(config.provider.authHeaderValue(apiKey: config.apiKey), forHTTPHeaderField: config.provider.authHeaderName)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let accountId = config.chatgptAccountId {
+            request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         request.timeoutInterval = 120
 

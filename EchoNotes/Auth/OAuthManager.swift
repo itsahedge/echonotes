@@ -35,6 +35,7 @@ final class OAuthManager: ObservableObject {
         var refreshToken: String
         var idToken: String
         var apiKey: String?
+        var accountId: String?
         var email: String?
         var expiresAt: Date?
 
@@ -193,16 +194,20 @@ final class OAuthManager: ObservableObject {
             }
             let tokens = try JSONDecoder().decode(TokenResponse.self, from: data)
 
-            // Extract email from id_token JWT
-            let email = Self.extractEmailFromJWT(tokens.id_token)
+            // Parse JWT for email and account ID
+            let claims = Self.parseJWT(tokens.id_token)
+            // Also check access_token for account_id (Codex uses this)
+            let accessClaims = Self.parseJWT(tokens.access_token)
+            let accountId = claims.accountId ?? accessClaims.accountId
 
             // Step 2: Try to exchange id_token for an API key.
-            // This fails for ChatGPT-only accounts without a platform org — that's OK.
+            // This fails for ChatGPT-only accounts — that's fine,
+            // we'll use the access token against the ChatGPT backend instead.
             var apiKey: String?
             do {
                 apiKey = try await exchangeForAPIKey(idToken: tokens.id_token)
             } catch {
-                logger.warning("API key exchange failed (expected for ChatGPT-only accounts): \(error.localizedDescription, privacy: .public)")
+                logger.warning("API key exchange failed, will use ChatGPT backend: \(error.localizedDescription, privacy: .public)")
             }
 
             // Store everything
@@ -211,19 +216,17 @@ final class OAuthManager: ObservableObject {
                 refreshToken: tokens.refresh_token,
                 idToken: tokens.id_token,
                 apiKey: apiKey,
-                email: email,
+                accountId: accountId,
+                email: claims.email,
                 expiresAt: Date().addingTimeInterval(3600 * 8) // ~8 hours
             )
             saveTokens(stored)
 
-            if apiKey != nil {
-                isAuthenticated = true
-                userEmail = email
-                logger.info("OAuth login successful for \(email ?? "unknown", privacy: .public)")
-            } else {
-                self.error = "Signed in as \(email ?? "unknown"), but your account doesn't have API platform access. Go to platform.openai.com to set up an organization, then sign in again. Or just paste an API key in the field above."
-                logger.warning("OAuth: no API key — user needs platform org")
-            }
+            // Always mark as authenticated — we can use either API key
+            // or access token against ChatGPT backend
+            isAuthenticated = true
+            userEmail = claims.email
+            logger.info("OAuth login successful for \(claims.email ?? "unknown", privacy: .public) (apiKey: \(apiKey != nil), accountId: \(accountId ?? "none", privacy: .public))")
         } catch {
             self.error = error.localizedDescription
             logger.error("OAuth error: \(error.localizedDescription, privacy: .public)")
@@ -298,16 +301,18 @@ final class OAuthManager: ObservableObject {
             }
             let refreshed = try JSONDecoder().decode(RefreshResponse.self, from: data)
 
-            // Try to get new API key (may fail for ChatGPT-only accounts)
             let apiKey = try? await exchangeForAPIKey(idToken: refreshed.id_token)
-            let email = Self.extractEmailFromJWT(refreshed.id_token)
+            let claims = Self.parseJWT(refreshed.id_token)
+            let accessClaims = Self.parseJWT(refreshed.access_token)
+            let accountId = claims.accountId ?? accessClaims.accountId
 
             let updated = OAuthTokens(
                 accessToken: refreshed.access_token,
                 refreshToken: refreshed.refresh_token,
                 idToken: refreshed.id_token,
                 apiKey: apiKey,
-                email: email,
+                accountId: accountId,
+                email: claims.email,
                 expiresAt: Date().addingTimeInterval(3600 * 8)
             )
             saveTokens(updated)
@@ -338,21 +343,36 @@ final class OAuthManager: ObservableObject {
 
     // MARK: - JWT Parsing
 
+    struct JWTClaims {
+        var email: String?
+        var accountId: String?
+    }
+
     nonisolated static func extractEmailFromJWT(_ jwt: String) -> String? {
+        parseJWT(jwt).email
+    }
+
+    nonisolated static func parseJWT(_ jwt: String) -> JWTClaims {
         let parts = jwt.split(separator: ".")
-        guard parts.count >= 2 else { return nil }
+        guard parts.count >= 2 else { return JWTClaims() }
 
         var payload = String(parts[1])
-        // Add padding if needed
         while payload.count % 4 != 0 { payload += "=" }
         payload = payload.replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
 
         guard let data = Data(base64Encoded: payload),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+            return JWTClaims()
         }
-        return json["email"] as? String
+
+        let email = json["email"] as? String
+
+        // OpenAI nests auth claims under "https://api.openai.com/auth"
+        let authClaims = json["https://api.openai.com/auth"] as? [String: Any]
+        let accountId = authClaims?["chatgpt_account_id"] as? String
+
+        return JWTClaims(email: email, accountId: accountId)
     }
 }
 
