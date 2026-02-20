@@ -92,6 +92,7 @@ final class OAuthManager: ObservableObject {
 
     /// Start the OAuth login flow.
     func login() {
+        logger.info("Starting OAuth login flow")
         isAuthenticating = true
         error = nil
 
@@ -178,8 +179,10 @@ final class OAuthManager: ObservableObject {
 
             let (data, response) = try await URLSession.shared.data(for: request)
 
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard httpStatus == 200 else {
                 let body = String(data: data, encoding: .utf8) ?? "unknown"
+                logger.error("Token exchange HTTP \(httpStatus, privacy: .public): \(body, privacy: .public)")
                 throw OAuthError.tokenExchangeFailed("Token exchange failed: \(body)")
             }
 
@@ -199,7 +202,7 @@ final class OAuthManager: ObservableObject {
             do {
                 apiKey = try await exchangeForAPIKey(idToken: tokens.id_token)
             } catch {
-                logger.warning("API key exchange failed (expected for ChatGPT-only accounts): \(error.localizedDescription)")
+                logger.warning("API key exchange failed (expected for ChatGPT-only accounts): \(error.localizedDescription, privacy: .public)")
             }
 
             // Store everything
@@ -216,14 +219,14 @@ final class OAuthManager: ObservableObject {
             if apiKey != nil {
                 isAuthenticated = true
                 userEmail = email
-                logger.info("OAuth login successful for \(email ?? "unknown")")
+                logger.info("OAuth login successful for \(email ?? "unknown", privacy: .public)")
             } else {
                 self.error = "Signed in as \(email ?? "unknown"), but your account doesn't have API platform access. Go to platform.openai.com to set up an organization, then sign in again. Or just paste an API key in the field above."
                 logger.warning("OAuth: no API key — user needs platform org")
             }
         } catch {
             self.error = error.localizedDescription
-            logger.error("OAuth error: \(error.localizedDescription)")
+            logger.error("OAuth error: \(error.localizedDescription, privacy: .public)")
         }
 
         isAuthenticating = false
