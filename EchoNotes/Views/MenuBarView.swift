@@ -115,8 +115,8 @@ struct MenuBarView: View {
             }
         }
         .padding()
-        .frame(width: 320)
-        .frame(minHeight: 280, maxHeight: 500)
+        .frame(width: 340)
+        .frame(minHeight: 300, maxHeight: 560)
     }
 
     // MARK: - State Views
