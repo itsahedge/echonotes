@@ -226,14 +226,14 @@ final class OAuthManager: ObservableObject {
             )
             saveTokens(stored)
 
+            // Always mark as authenticated — with API key we use the standard API,
+            // without it we use the ChatGPT backend Responses API (like Codex CLI)
+            isAuthenticated = true
+            userEmail = claims.email
             if apiKey != nil {
-                isAuthenticated = true
-                userEmail = claims.email
                 logger.info("OAuth login successful with API key for \(claims.email ?? "unknown", privacy: .public)")
             } else {
-                // Token exchange failed — need billing on platform.openai.com
-                self.error = "Signed in as \(claims.email ?? "unknown"), but API access requires billing at platform.openai.com. Add a payment method there, then sign in again."
-                logger.warning("OAuth: signed in but no API key — needs platform billing")
+                logger.info("OAuth login successful via ChatGPT backend for \(claims.email ?? "unknown", privacy: .public)")
             }
         } catch {
             self.error = error.localizedDescription

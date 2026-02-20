@@ -67,8 +67,8 @@ final class TranscriptionManager: ObservableObject {
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
-        // If using OpenAI with OAuth and we got an API key from token exchange
-        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, tokens.apiKey != nil {
+        // OAuth: either API key or access token via ChatGPT backend
+        if selectedProvider == .openai, oauthManager.isAuthenticated {
             return true
         }
         if selectedProvider.requiresAPIKey {
@@ -90,25 +90,14 @@ final class TranscriptionManager: ObservableObject {
                     provider: selectedProvider
                 )
             } else {
-                // No platform API key — token exchange failed.
-                // The access token can't be used against api.openai.com directly.
-                // User needs to set up billing on platform.openai.com for the
-                // token exchange to produce an API key.
-                // Fall back to manual API key if available.
-                if !openaiAPIKey.isEmpty {
-                    return AIService.Configuration(
-                        apiKey: openaiAPIKey,
-                        model: selectedAIModel,
-                        endpoint: URL(string: selectedProvider.defaultEndpoint)!,
-                        provider: selectedProvider
-                    )
-                }
-                // Return config with empty key — isAIConfigured will catch this
+                // No API key — use access token against ChatGPT backend
+                // (Responses API at chatgpt.com/backend-api/codex/responses)
                 return AIService.Configuration(
-                    apiKey: "",
-                    model: selectedAIModel,
-                    endpoint: URL(string: selectedProvider.defaultEndpoint)!,
-                    provider: selectedProvider
+                    apiKey: tokens.accessToken,
+                    model: "gpt-4o",
+                    endpoint: URL(string: "https://chatgpt.com/backend-api/codex/responses")!,
+                    provider: selectedProvider,
+                    chatgptAccountId: tokens.accountId
                 )
             }
         }

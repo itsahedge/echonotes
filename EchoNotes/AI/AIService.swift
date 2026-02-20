@@ -50,6 +50,11 @@ final class AIService: Sendable {
 
     /// Summarize a transcript using the configured AI provider.
     func summarize(transcript: String, config: Configuration) async throws -> MeetingSummary {
+        // Use ChatGPT backend Responses API when we have an account ID but no API key
+        if config.chatgptAccountId != nil {
+            return try await summarizeChatGPTBackend(transcript: transcript, config: config)
+        }
+
         switch config.provider {
         case .anthropic:
             return try await summarizeAnthropic(transcript: transcript, config: config)
@@ -59,6 +64,73 @@ final class AIService: Sendable {
             // OpenAI-compatible (OpenAI, Ollama)
             return try await summarizeOpenAICompatible(transcript: transcript, config: config)
         }
+    }
+
+    // MARK: - ChatGPT Backend (Responses API)
+
+    /// Use the ChatGPT backend Responses API with OAuth access token.
+    /// Same approach as Codex CLI: Bearer access_token + chatgpt-account-id header.
+    private func summarizeChatGPTBackend(transcript: String, config: Configuration) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript)
+        let systemPrompt = "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."
+
+        let requestBody: [String: Any] = [
+            "model": config.model,
+            "instructions": systemPrompt,
+            "input": prompt,
+        ]
+
+        let url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let accountId = config.chatgptAccountId {
+            request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        request.timeoutInterval = 120
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            throw AIError.apiError(statusCode: httpResponse.statusCode, message: body)
+        }
+
+        // Parse Responses API format
+        return try parseChatGPTResponse(data)
+    }
+
+    /// Parse the OpenAI Responses API format.
+    func parseChatGPTResponse(_ data: Data) throws -> MeetingSummary {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let output = json["output"] as? [[String: Any]] else {
+            throw AIError.invalidResponse
+        }
+
+        // Find the message output with text content
+        for item in output {
+            guard let type = item["type"] as? String, type == "message",
+                  let content = item["content"] as? [[String: Any]] else { continue }
+            for block in content {
+                guard let blockType = block["type"] as? String, blockType == "output_text",
+                      let text = block["text"] as? String else { continue }
+                // Parse the JSON text into MeetingSummary
+                var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+                if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+                if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+                cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let summaryData = cleaned.data(using: .utf8) else { continue }
+                return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+            }
+        }
+
+        throw AIError.invalidResponse
     }
 
     // MARK: - OpenAI-compatible (OpenAI, Ollama)
