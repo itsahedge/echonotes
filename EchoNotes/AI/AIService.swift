@@ -77,7 +77,9 @@ final class AIService: Sendable {
         let requestBody: [String: Any] = [
             "model": config.model,
             "instructions": systemPrompt,
-            "input": prompt,
+            "input": [
+                ["role": "user", "content": prompt]
+            ],
         ]
 
         let url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
