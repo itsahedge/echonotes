@@ -67,8 +67,8 @@ final class TranscriptionManager: ObservableObject {
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
-        // If using OpenAI with OAuth, check for either API key or access token
-        if selectedProvider == .openai, oauthManager.isAuthenticated {
+        // If using OpenAI with OAuth and we got an API key from token exchange
+        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, tokens.apiKey != nil {
             return true
         }
         if selectedProvider.requiresAPIKey {
@@ -90,14 +90,25 @@ final class TranscriptionManager: ObservableObject {
                     provider: selectedProvider
                 )
             } else {
-                // No platform API key — use access token against standard API
-                // with ChatGPT account ID header for auth routing
+                // No platform API key — token exchange failed.
+                // The access token can't be used against api.openai.com directly.
+                // User needs to set up billing on platform.openai.com for the
+                // token exchange to produce an API key.
+                // Fall back to manual API key if available.
+                if !openaiAPIKey.isEmpty {
+                    return AIService.Configuration(
+                        apiKey: openaiAPIKey,
+                        model: selectedAIModel,
+                        endpoint: URL(string: selectedProvider.defaultEndpoint)!,
+                        provider: selectedProvider
+                    )
+                }
+                // Return config with empty key — isAIConfigured will catch this
                 return AIService.Configuration(
-                    apiKey: tokens.accessToken,
-                    model: "gpt-4o",
-                    endpoint: URL(string: "https://api.openai.com/v1/chat/completions")!,
-                    provider: selectedProvider,
-                    chatgptAccountId: tokens.accountId
+                    apiKey: "",
+                    model: selectedAIModel,
+                    endpoint: URL(string: selectedProvider.defaultEndpoint)!,
+                    provider: selectedProvider
                 )
             }
         }
