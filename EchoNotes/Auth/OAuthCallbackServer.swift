@@ -71,7 +71,7 @@ final class OAuthCallbackServer: @unchecked Sendable {
             let path = String(parts[1])
 
             // Parse the callback path
-            guard path.hasPrefix("/callback") else {
+            guard path.hasPrefix("/auth/callback") else {
                 self.sendResponse(connection: connection, status: "404 Not Found", body: "Not found")
                 return
             }

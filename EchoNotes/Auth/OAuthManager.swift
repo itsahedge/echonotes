@@ -121,8 +121,8 @@ final class OAuthManager: ObservableObject {
             return
         }
 
-        // Build authorization URL
-        let redirectURI = "http://localhost:\(Self.callbackPort)/callback"
+        // Build authorization URL (must match Codex CLI format)
+        let redirectURI = "http://localhost:\(Self.callbackPort)/auth/callback"
         var components = URLComponents(string: Self.authorizeURL)!
         components.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
@@ -132,7 +132,9 @@ final class OAuthManager: ObservableObject {
             URLQueryItem(name: "code_challenge", value: pkce.codeChallenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "id_token_add_organizations", value: "true"),
             URLQueryItem(name: "codex_cli_simplified_flow", value: "true"),
+            URLQueryItem(name: "originator", value: "codex_cli_rs"),
         ]
 
         guard let authURL = components.url else {
@@ -155,7 +157,7 @@ final class OAuthManager: ObservableObject {
             return
         }
 
-        let redirectURI = "http://localhost:\(Self.callbackPort)/callback"
+        let redirectURI = "http://localhost:\(Self.callbackPort)/auth/callback"
 
         // Step 1: Exchange code for id_token + access_token + refresh_token
         let tokenBody = [
