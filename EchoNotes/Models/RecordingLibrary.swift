@@ -37,9 +37,9 @@ struct RecordingEntry: Identifiable, Sendable {
             // Create a simple transcript with the full text as one segment
             let segment = TranscriptSegment(startTime: 0, endTime: duration, text: text)
             return Transcript(
-                date: date,
                 segments: [segment],
-                recordingURL: url
+                recordingURL: url,
+                createdAt: date
             )
         }
 
