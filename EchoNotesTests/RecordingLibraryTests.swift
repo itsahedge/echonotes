@@ -90,6 +90,115 @@ struct RecordingLibraryTests {
         #expect(remaining[0].filename == "b.m4a")
     }
 
+    // MARK: - loadTranscript
+
+    @Test("loadTranscript loads from .json file")
+    func loadTranscriptFromJSON() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let m4aURL = dir.appendingPathComponent("test.m4a")
+        FileManager.default.createFile(atPath: m4aURL.path, contents: nil)
+
+        // Create a .json transcript file
+        let transcript = Transcript(
+            segments: [TranscriptSegment(startTime: 0, endTime: 10, text: "Hello from JSON")],
+            recordingURL: m4aURL,
+            createdAt: Date()
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(transcript)
+        try data.write(to: dir.appendingPathComponent("test.json"))
+
+        let entry = RecordingEntry(
+            id: m4aURL, url: m4aURL, date: Date(), duration: 10,
+            transcriptPreview: nil, fullTranscriptText: nil, hasTranscript: true
+        )
+        let loaded = entry.loadTranscript()
+        #expect(loaded != nil)
+        #expect(loaded?.segments.first?.text == "Hello from JSON")
+    }
+
+    @Test("loadTranscript falls back to .txt when no .json exists")
+    func loadTranscriptFromTXT() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let m4aURL = dir.appendingPathComponent("test.m4a")
+        FileManager.default.createFile(atPath: m4aURL.path, contents: nil)
+
+        // Create only a .txt file (no .json)
+        let txtURL = dir.appendingPathComponent("test.txt")
+        try "Hello from plain text fallback".write(to: txtURL, atomically: true, encoding: .utf8)
+
+        let entry = RecordingEntry(
+            id: m4aURL, url: m4aURL, date: Date(), duration: 30,
+            transcriptPreview: "Hello from plain", fullTranscriptText: "Hello from plain text fallback", hasTranscript: true
+        )
+        let loaded = entry.loadTranscript()
+        #expect(loaded != nil)
+        #expect(loaded?.segments.count == 1)
+        #expect(loaded?.segments.first?.text == "Hello from plain text fallback")
+        #expect(loaded?.segments.first?.startTime == 0)
+        #expect(loaded?.segments.first?.endTime == 30)
+    }
+
+    @Test("loadTranscript returns nil when no .json or .txt exists")
+    func loadTranscriptReturnsNil() {
+        let url = URL(fileURLWithPath: "/tmp/nonexistent-\(UUID().uuidString).m4a")
+        let entry = RecordingEntry(
+            id: url, url: url, date: Date(), duration: 10,
+            transcriptPreview: nil, fullTranscriptText: nil, hasTranscript: false
+        )
+        #expect(entry.loadTranscript() == nil)
+    }
+
+    @Test("loadTranscript returns nil for empty .txt file")
+    func loadTranscriptEmptyTXT() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let m4aURL = dir.appendingPathComponent("test.m4a")
+        FileManager.default.createFile(atPath: m4aURL.path, contents: nil)
+
+        let txtURL = dir.appendingPathComponent("test.txt")
+        try "   \n  ".write(to: txtURL, atomically: true, encoding: .utf8)
+
+        let entry = RecordingEntry(
+            id: m4aURL, url: m4aURL, date: Date(), duration: 10,
+            transcriptPreview: nil, fullTranscriptText: nil, hasTranscript: true
+        )
+        #expect(entry.loadTranscript() == nil)
+    }
+
+    @Test("loadTranscript prefers .json over .txt when both exist")
+    func loadTranscriptPrefersJSON() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        let m4aURL = dir.appendingPathComponent("test.m4a")
+        FileManager.default.createFile(atPath: m4aURL.path, contents: nil)
+
+        // Create both .json and .txt
+        let transcript = Transcript(
+            segments: [TranscriptSegment(startTime: 0, endTime: 10, text: "From JSON")],
+            recordingURL: m4aURL,
+            createdAt: Date()
+        )
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(transcript).write(to: dir.appendingPathComponent("test.json"))
+        try "From TXT".write(to: dir.appendingPathComponent("test.txt"), atomically: true, encoding: .utf8)
+
+        let entry = RecordingEntry(
+            id: m4aURL, url: m4aURL, date: Date(), duration: 10,
+            transcriptPreview: nil, fullTranscriptText: nil, hasTranscript: true
+        )
+        let loaded = entry.loadTranscript()
+        #expect(loaded?.segments.first?.text == "From JSON")
+    }
+
     // MARK: - Helpers
 
     private func makeEntry(
