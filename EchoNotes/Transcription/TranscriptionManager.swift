@@ -95,7 +95,7 @@ final class TranscriptionManager: ObservableObject {
                 return AIService.Configuration(
                     apiKey: tokens.accessToken,
                     model: "gpt-4o",
-                    endpoint: URL(string: "https://chatgpt.com/backend-api/codex/responses")!,
+                    endpoint: URL(string: "https://chatgpt.com/backend-api/responses")!,
                     provider: selectedProvider,
                     chatgptAccountId: tokens.accountId
                 )
