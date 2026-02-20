@@ -316,7 +316,7 @@ final class OAuthManager: ObservableObject {
                 expiresAt: Date().addingTimeInterval(3600 * 8)
             )
             saveTokens(updated)
-            userEmail = email
+            userEmail = claims.email
             logger.info("Token refresh successful")
         } catch {
             logger.error("Token refresh failed: \(error.localizedDescription)")
