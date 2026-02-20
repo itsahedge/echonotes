@@ -215,7 +215,6 @@ final class AIService: Sendable {
 
         return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
     }
-}
 
     /// Parse Anthropic messages API response.
     func parseAnthropicResponse(_ data: Data) throws -> MeetingSummary {
