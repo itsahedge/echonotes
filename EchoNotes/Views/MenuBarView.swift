@@ -18,7 +18,7 @@ struct MenuBarView: View {
             // Header
             HStack {
                 Image(systemName: "waveform")
-                    .foregroundStyle(recorder.isRecording ? .red : .purple)
+                    .foregroundStyle(recorder.isRecording ? .red : .primary)
                 Text("EchoNotes")
                     .font(.headline)
                 Spacer()
@@ -117,7 +117,6 @@ struct MenuBarView: View {
         .padding()
         .frame(width: 320)
         .frame(minHeight: 280, maxHeight: 500)
-        .tint(.purple)
     }
 
     // MARK: - State Views
@@ -206,7 +205,7 @@ struct MenuBarView: View {
         VStack(spacing: 12) {
             Image(systemName: "mic.badge.plus")
                 .font(.system(size: 40))
-                .foregroundStyle(.purple)
+                .foregroundStyle(.secondary)
             Text("Ready to record")
                 .font(.title3)
             Text("Start a call in any app, then hit record.")
@@ -253,7 +252,7 @@ struct MenuBarView: View {
         VStack(spacing: 12) {
             Image(systemName: "text.badge.checkmark")
                 .font(.system(size: 40))
-                .foregroundStyle(.purple)
+                .foregroundStyle(.secondary)
             Text("Recording saved")
                 .font(.title3)
             Text("Transcribe to get a text version of your call.")

@@ -12,7 +12,7 @@ struct LevelMeterView: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.secondary.opacity(0.2))
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(level > 0.5 ? Color.pink : Color.purple)
+                        .fill(level > 0.5 ? Color.orange : Color.green)
                         .frame(width: geo.size.width * CGFloat(min(level * 4, 1.0)))
                         .animation(.linear(duration: 0.1), value: level)
                 }
