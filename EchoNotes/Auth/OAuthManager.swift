@@ -200,6 +200,10 @@ final class OAuthManager: ObservableObject {
             let accessClaims = Self.parseJWT(tokens.access_token)
             let accountId = claims.accountId ?? accessClaims.accountId
 
+            // Debug: log full JWT claims to diagnose token exchange failure
+            logger.info("id_token claims: \(Self.debugJWTClaims(tokens.id_token), privacy: .public)")
+            logger.info("access_token claims: \(Self.debugJWTClaims(tokens.access_token), privacy: .public)")
+
             // Step 2: Try to exchange id_token for an API key.
             // This fails for ChatGPT-only accounts — that's fine,
             // we'll use the access token against the ChatGPT backend instead.
@@ -377,6 +381,32 @@ final class OAuthManager: ObservableObject {
         let accountId = authClaims?["chatgpt_account_id"] as? String
 
         return JWTClaims(email: email, accountId: accountId)
+    }
+
+    /// Debug: return all JWT claim keys (not values) for logging
+    nonisolated static func debugJWTClaims(_ jwt: String) -> String {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return "invalid JWT" }
+
+        var payload = String(parts[1])
+        while payload.count % 4 != 0 { payload += "=" }
+        payload = payload.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return "failed to decode"
+        }
+
+        // Log keys and the auth sub-object keys
+        var result = "keys: \(json.keys.sorted().joined(separator: ", "))"
+        if let auth = json["https://api.openai.com/auth"] as? [String: Any] {
+            result += " | auth keys: \(auth.keys.sorted().joined(separator: ", "))"
+            // Also log org-related values
+            if let orgId = auth["organization_id"] as? String { result += " | org_id: \(orgId)" }
+            if let acctId = auth["chatgpt_account_id"] as? String { result += " | acct_id: \(acctId)" }
+        }
+        return result
     }
 }
 
