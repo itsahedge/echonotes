@@ -16,8 +16,9 @@ final class OAuthManager: ObservableObject {
     static let tokenURL = "\(issuer)/oauth/token"
     static let scopes = "openid profile email offline_access"
 
-    // Local callback server port
-    private static let callbackPort: UInt16 = 18923
+    // Local callback server port — must match Codex CLI default (1455)
+    // OpenAI likely has this redirect URI registered for the client ID
+    private static let callbackPort: UInt16 = 1455
 
     @Published var isAuthenticating = false
     @Published var isAuthenticated = false
