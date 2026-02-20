@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import CryptoKit
 import os
 
@@ -15,8 +16,9 @@ final class OAuthManager: ObservableObject {
     static let tokenURL = "\(issuer)/oauth/token"
     static let scopes = "openid profile email offline_access"
 
-    // Local callback server port
-    private static let callbackPort: UInt16 = 18923
+    // Local callback server port — must match Codex CLI default (1455)
+    // OpenAI likely has this redirect URI registered for the client ID
+    private static let callbackPort: UInt16 = 1455
 
     @Published var isAuthenticating = false
     @Published var isAuthenticated = false
@@ -120,8 +122,8 @@ final class OAuthManager: ObservableObject {
             return
         }
 
-        // Build authorization URL
-        let redirectURI = "http://localhost:\(Self.callbackPort)/callback"
+        // Build authorization URL (must match Codex CLI format)
+        let redirectURI = "http://localhost:\(Self.callbackPort)/auth/callback"
         var components = URLComponents(string: Self.authorizeURL)!
         components.queryItems = [
             URLQueryItem(name: "response_type", value: "code"),
@@ -131,7 +133,9 @@ final class OAuthManager: ObservableObject {
             URLQueryItem(name: "code_challenge", value: pkce.codeChallenge),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "state", value: state),
+            URLQueryItem(name: "id_token_add_organizations", value: "true"),
             URLQueryItem(name: "codex_cli_simplified_flow", value: "true"),
+            URLQueryItem(name: "originator", value: "codex_cli_rs"),
         ]
 
         guard let authURL = components.url else {
@@ -154,7 +158,7 @@ final class OAuthManager: ObservableObject {
             return
         }
 
-        let redirectURI = "http://localhost:\(Self.callbackPort)/callback"
+        let redirectURI = "http://localhost:\(Self.callbackPort)/auth/callback"
 
         // Step 1: Exchange code for id_token + access_token + refresh_token
         let tokenBody = [
@@ -186,11 +190,17 @@ final class OAuthManager: ObservableObject {
             }
             let tokens = try JSONDecoder().decode(TokenResponse.self, from: data)
 
-            // Step 2: Exchange id_token for an API key
-            let apiKey = try await exchangeForAPIKey(idToken: tokens.id_token)
-
             // Extract email from id_token JWT
             let email = Self.extractEmailFromJWT(tokens.id_token)
+
+            // Step 2: Try to exchange id_token for an API key.
+            // This fails for ChatGPT-only accounts without a platform org — that's OK.
+            var apiKey: String?
+            do {
+                apiKey = try await exchangeForAPIKey(idToken: tokens.id_token)
+            } catch {
+                logger.warning("API key exchange failed (expected for ChatGPT-only accounts): \(error.localizedDescription)")
+            }
 
             // Store everything
             let stored = OAuthTokens(
@@ -203,9 +213,14 @@ final class OAuthManager: ObservableObject {
             )
             saveTokens(stored)
 
-            isAuthenticated = true
-            userEmail = email
-            logger.info("OAuth login successful for \(email ?? "unknown")")
+            if apiKey != nil {
+                isAuthenticated = true
+                userEmail = email
+                logger.info("OAuth login successful for \(email ?? "unknown")")
+            } else {
+                self.error = "Signed in as \(email ?? "unknown"), but your account doesn't have API platform access. Go to platform.openai.com to set up an organization, then sign in again. Or just paste an API key in the field above."
+                logger.warning("OAuth: no API key — user needs platform org")
+            }
         } catch {
             self.error = error.localizedDescription
             logger.error("OAuth error: \(error.localizedDescription)")
@@ -280,8 +295,8 @@ final class OAuthManager: ObservableObject {
             }
             let refreshed = try JSONDecoder().decode(RefreshResponse.self, from: data)
 
-            // Get new API key
-            let apiKey = try await exchangeForAPIKey(idToken: refreshed.id_token)
+            // Try to get new API key (may fail for ChatGPT-only accounts)
+            let apiKey = try? await exchangeForAPIKey(idToken: refreshed.id_token)
             let email = Self.extractEmailFromJWT(refreshed.id_token)
 
             let updated = OAuthTokens(
