@@ -80,6 +80,7 @@ final class AIService: Sendable {
             "input": [
                 ["role": "user", "content": prompt]
             ],
+            "store": false,
         ]
 
         let url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
@@ -108,31 +109,47 @@ final class AIService: Sendable {
     }
 
     /// Parse the OpenAI Responses API format.
+    /// Response contains `output_text` (shorthand) and/or `output` array with message items.
     func parseChatGPTResponse(_ data: Data) throws -> MeetingSummary {
-        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let output = json["output"] as? [[String: Any]] else {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw AIError.invalidResponse
         }
 
-        // Find the message output with text content
-        for item in output {
-            guard let type = item["type"] as? String, type == "message",
-                  let content = item["content"] as? [[String: Any]] else { continue }
-            for block in content {
-                guard let blockType = block["type"] as? String, blockType == "output_text",
-                      let text = block["text"] as? String else { continue }
-                // Parse the JSON text into MeetingSummary
-                var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
-                if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
-                if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
-                cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard let summaryData = cleaned.data(using: .utf8) else { continue }
-                return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+        // Try output_text shorthand first
+        var text: String?
+        if let outputText = json["output_text"] as? String {
+            text = outputText
+        }
+
+        // Fall back to parsing the output array
+        if text == nil, let output = json["output"] as? [[String: Any]] {
+            for item in output {
+                guard let type = item["type"] as? String, type == "message",
+                      let content = item["content"] as? [[String: Any]] else { continue }
+                for block in content {
+                    guard let blockType = block["type"] as? String, blockType == "output_text",
+                          let blockText = block["text"] as? String else { continue }
+                    text = blockText
+                    break
+                }
+                if text != nil { break }
             }
         }
 
-        throw AIError.invalidResponse
+        guard var cleaned = text?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            throw AIError.invalidResponse
+        }
+
+        // Strip markdown code fences if present
+        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let summaryData = cleaned.data(using: .utf8) else {
+            throw AIError.invalidResponse
+        }
+        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
     }
 
     // MARK: - OpenAI-compatible (OpenAI, Ollama)
