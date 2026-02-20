@@ -3,7 +3,7 @@ import SwiftUI
 /// Displays a browsable list of past recordings.
 struct LibraryView: View {
     @ObservedObject var library: RecordingLibrary
-    let onSelect: (Transcript) -> Void
+    let onSelect: (RecordingEntry) -> Void
     let onBack: () -> Void
 
     static let dateFormatter: DateFormatter = {
@@ -71,9 +71,7 @@ struct LibraryView: View {
                     LazyVStack(spacing: 6) {
                         ForEach(library.filteredEntries) { entry in
                             RecordingRow(entry: entry, onSelect: {
-                                if let transcript = entry.loadTranscript() {
-                                    onSelect(transcript)
-                                }
+                                onSelect(entry)
                             }, onDelete: {
                                 library.delete(entry)
                             })
@@ -119,7 +117,6 @@ private struct RecordingRow: View {
             .cornerRadius(6)
         }
         .buttonStyle(.plain)
-        .disabled(!entry.hasTranscript)
         .contextMenu {
             Button(action: {
                 NSWorkspace.shared.selectFile(entry.url.path, inFileViewerRootedAtPath: entry.url.deletingLastPathComponent().path)

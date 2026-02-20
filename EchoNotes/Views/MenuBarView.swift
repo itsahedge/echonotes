@@ -11,7 +11,7 @@ struct MenuBarView: View {
 
     @State private var showingLibrary = false
     @State private var showingSettings = false
-    @State private var selectedTranscript: Transcript?
+    @State private var selectedEntry: RecordingEntry?
 
     var body: some View {
         VStack(spacing: 16) {
@@ -54,16 +54,16 @@ struct MenuBarView: View {
             if showingSettings {
                 SettingsView(tm: tm, onBack: { showingSettings = false })
             } else if showingLibrary {
-                if let transcript = selectedTranscript {
-                    TranscriptDisplayView(transcript: transcript, onNew: {
-                        selectedTranscript = nil
+                if let entry = selectedEntry {
+                    RecordingDetailView(entry: entry, tm: tm, onBack: {
+                        selectedEntry = nil
                     })
                 } else {
-                    LibraryView(library: library, onSelect: { transcript in
-                        selectedTranscript = transcript
+                    LibraryView(library: library, onSelect: { entry in
+                        selectedEntry = entry
                     }, onBack: {
                         showingLibrary = false
-                        selectedTranscript = nil
+                        selectedEntry = nil
                     })
                 }
             } else if recorder.isRecording {
