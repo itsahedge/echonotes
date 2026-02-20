@@ -90,11 +90,12 @@ final class TranscriptionManager: ObservableObject {
                     provider: selectedProvider
                 )
             } else {
-                // No API key — use access token against ChatGPT backend
+                // No platform API key — use access token against standard API
+                // with ChatGPT account ID header for auth routing
                 return AIService.Configuration(
                     apiKey: tokens.accessToken,
                     model: "gpt-4o",
-                    endpoint: URL(string: "https://chatgpt.com/backend-api/v1/chat/completions")!,
+                    endpoint: URL(string: "https://api.openai.com/v1/chat/completions")!,
                     provider: selectedProvider,
                     chatgptAccountId: tokens.accountId
                 )
