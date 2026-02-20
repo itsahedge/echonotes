@@ -70,6 +70,7 @@ final class AIService: Sendable {
 
     /// Use the ChatGPT backend Responses API with OAuth access token.
     /// Same approach as Codex CLI: Bearer access_token + chatgpt-account-id header.
+    /// The Codex backend requires stream: true, so we collect SSE events.
     private func summarizeChatGPTBackend(transcript: String, config: Configuration) async throws -> MeetingSummary {
         let prompt = summaryPrompt(transcript: transcript)
         let systemPrompt = "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."
@@ -81,6 +82,7 @@ final class AIService: Sendable {
                 ["role": "user", "content": prompt]
             ],
             "store": false,
+            "stream": true,
         ]
 
         let url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
@@ -94,18 +96,60 @@ final class AIService: Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         request.timeoutInterval = 120
 
-        let (data, response) = try await URLSession.shared.data(for: request)
+        // Stream the response and collect text deltas
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AIError.invalidResponse
         }
         guard httpResponse.statusCode == 200 else {
-            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            // Read the error body
+            var errorData = Data()
+            for try await byte in bytes { errorData.append(byte) }
+            let body = String(data: errorData, encoding: .utf8) ?? "unknown"
             throw AIError.apiError(statusCode: httpResponse.statusCode, message: body)
         }
 
-        // Parse Responses API format
-        return try parseChatGPTResponse(data)
+        // Parse SSE events to collect the full text output
+        var fullText = ""
+        for try await line in bytes.lines {
+            // SSE format: "data: {...}" or "data: [DONE]"
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = String(line.dropFirst(6))
+            if payload == "[DONE]" { break }
+
+            guard let eventData = payload.data(using: .utf8),
+                  let event = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else { continue }
+
+            // Look for text delta events: response.output_text.delta
+            if let type = event["type"] as? String, type == "response.output_text.delta",
+               let delta = event["delta"] as? String {
+                fullText += delta
+            }
+
+            // Also check for response.completed which has the final output_text
+            if let type = event["type"] as? String, type == "response.completed",
+               let resp = event["response"] as? [String: Any],
+               let outputText = resp["output_text"] as? String {
+                fullText = outputText
+            }
+        }
+
+        guard !fullText.isEmpty else {
+            throw AIError.invalidResponse
+        }
+
+        // Parse the collected text as JSON
+        var cleaned = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let summaryData = cleaned.data(using: .utf8) else {
+            throw AIError.invalidResponse
+        }
+        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
     }
 
     /// Parse the OpenAI Responses API format.
