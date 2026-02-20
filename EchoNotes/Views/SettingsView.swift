@@ -54,7 +54,7 @@ struct SettingsView: View {
 
                         HStack(spacing: 8) {
                             Button(action: {
-                                tm.openaiAPIKey = apiKeyInput
+                                tm.setOpenAIAPIKey(apiKeyInput)
                             }) {
                                 Text("Save")
                                     .font(.caption)
@@ -65,7 +65,7 @@ struct SettingsView: View {
 
                             if !tm.openaiAPIKey.isEmpty {
                                 Button(action: {
-                                    tm.openaiAPIKey = ""
+                                    tm.setOpenAIAPIKey("")
                                     apiKeyInput = ""
                                 }) {
                                     Text("Remove Key")
