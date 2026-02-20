@@ -99,8 +99,10 @@ struct MenuBarView: View {
                     .cornerRadius(6)
             }
 
-            // Primary action button
-            RecordingControlsView(recorder: recorder, delegate: delegate)
+            // Primary action button — hide when browsing library/settings/detail
+            if !showingLibrary && !showingSettings {
+                RecordingControlsView(recorder: recorder, delegate: delegate)
+            }
 
             // Quit button
             HStack {
