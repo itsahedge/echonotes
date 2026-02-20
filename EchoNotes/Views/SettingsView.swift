@@ -26,6 +26,7 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     aiProviderSection
+                    oauthSection
                     aboutSection
                 }
             }
@@ -153,6 +154,59 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.05))
+        .cornerRadius(8)
+    }
+
+    // MARK: - OAuth Section
+
+    private var oauthSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Sign In with Account", systemImage: "person.crop.circle")
+                .font(.subheadline.bold())
+
+            Text("Sign in with your existing subscription instead of an API key. Your ChatGPT Plus/Pro or Claude subscription includes API access.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // OpenAI OAuth
+            HStack(spacing: 10) {
+                Button(action: {
+                    // TODO: Implement OAuth PKCE flow (see issue #119)
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.caption)
+                        Text("Sign in with ChatGPT")
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+                .disabled(true) // Not yet implemented
+
+                Button(action: {
+                    // TODO: Implement Anthropic OAuth
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.right.circle.fill")
+                            .font(.caption)
+                        Text("Sign in with Claude")
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.bordered)
+                .disabled(true) // Not yet implemented
+            }
+
+            Text("Coming soon — see [issue #119](https://github.com/itsahedge/echonotes/issues/119) for progress")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding(12)
         .background(Color.secondary.opacity(0.05))
