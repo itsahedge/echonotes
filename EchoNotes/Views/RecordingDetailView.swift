@@ -198,7 +198,7 @@ struct RecordingDetailView: View {
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
                         .disabled(isSummarizing)
-                    } else if !tm.openaiAPIKey.isEmpty {
+                    } else if tm.isAIConfigured {
                         // No summary, has API key
                         Button(action: { generateSummary() }) {
                             HStack {
@@ -306,7 +306,7 @@ struct RecordingDetailView: View {
         Task {
             do {
                 let service = AIService()
-                let config = AIService.Configuration(apiKey: tm.openaiAPIKey)
+                let config = tm.aiConfiguration()
                 let text = transcript.toPlainText()
                 let result = try await service.summarize(transcript: text, config: config)
 
