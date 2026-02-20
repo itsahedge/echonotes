@@ -53,8 +53,15 @@ final class TranscriptionManager: ObservableObject {
         didSet { UserDefaults.standard.set(selectedAIModel, forKey: Self.aiModelDefaultsKey) }
     }
 
+    /// OAuth manager for ChatGPT login
+    let oauthManager = OAuthManager()
+
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
+        // If using OpenAI with OAuth token, check that
+        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, tokens.apiKey != nil {
+            return true
+        }
         if selectedProvider.requiresAPIKey {
             return !openaiAPIKey.isEmpty
         }
@@ -63,8 +70,14 @@ final class TranscriptionManager: ObservableObject {
 
     /// Build an AIService.Configuration from current settings.
     func aiConfiguration() -> AIService.Configuration {
-        AIService.Configuration(
-            apiKey: openaiAPIKey,
+        // Prefer OAuth API key for OpenAI if available
+        var apiKey = openaiAPIKey
+        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, let oauthKey = tokens.apiKey {
+            apiKey = oauthKey
+        }
+
+        return AIService.Configuration(
+            apiKey: apiKey,
             model: selectedAIModel,
             endpoint: URL(string: selectedProvider.defaultEndpoint)!,
             provider: selectedProvider

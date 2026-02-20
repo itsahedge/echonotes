@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Settings page for app configuration (AI provider, model, etc).
+/// Settings page for app configuration (AI provider, model, OAuth, etc).
 struct SettingsView: View {
     @ObservedObject var tm: TranscriptionManager
     let onBack: () -> Void
@@ -25,6 +25,7 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    oauthSection
                     aiProviderSection
                     aboutSection
                 }
@@ -35,6 +36,70 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - OAuth Section
+
+    private var oauthSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Sign In with Account", systemImage: "person.crop.circle")
+                .font(.subheadline.bold())
+
+            Text("Sign in with your existing ChatGPT subscription instead of an API key. Your Plus/Pro plan includes API access.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if tm.oauthManager.isAuthenticated {
+                // Signed in state
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Signed in with ChatGPT")
+                            .font(.caption.bold())
+                        if let email = tm.oauthManager.userEmail {
+                            Text(email)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button(action: { tm.oauthManager.logout() }) {
+                        Text("Sign Out")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else {
+                // Sign in button
+                Button(action: { tm.oauthManager.login() }) {
+                    HStack(spacing: 6) {
+                        if tm.oauthManager.isAuthenticating {
+                            ProgressView().controlSize(.mini)
+                            Text("Waiting for browser…")
+                        } else {
+                            Image(systemName: "arrow.right.circle.fill")
+                            Text("Sign in with ChatGPT")
+                        }
+                    }
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(tm.oauthManager.isAuthenticating)
+
+                if let error = tm.oauthManager.error {
+                    Text(error)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.05))
+        .cornerRadius(8)
+    }
+
     // MARK: - AI Provider Section
 
     private var aiProviderSection: some View {
@@ -42,9 +107,20 @@ struct SettingsView: View {
             Label("AI Summarization", systemImage: "sparkles")
                 .font(.subheadline.bold())
 
-            Text("Choose an AI provider for meeting summaries. Your API key is stored locally and never sent anywhere except the provider's API.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            if tm.oauthManager.isAuthenticated && tm.selectedProvider == .openai {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.green)
+                    Text("Using your ChatGPT account for OpenAI API access")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("Choose an AI provider for meeting summaries. Your API key is stored locally and never sent anywhere except the provider's API.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             // Provider picker
             VStack(alignment: .leading, spacing: 6) {
@@ -60,7 +136,6 @@ struct SettingsView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: tm.selectedProvider) { _, newValue in
                     tm.selectedAIModel = newValue.defaultModel
-                    // Clear key when switching providers (different key formats)
                     if newValue.requiresAPIKey && apiKeyInput.isEmpty {
                         apiKeyInput = ""
                     }
@@ -81,8 +156,8 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
             }
 
-            // API Key (if required)
-            if tm.selectedProvider.requiresAPIKey {
+            // API Key (if required and not using OAuth)
+            if tm.selectedProvider.requiresAPIKey && !(tm.oauthManager.isAuthenticated && tm.selectedProvider == .openai) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("API Key")
                         .font(.caption.bold())
@@ -142,8 +217,8 @@ struct SettingsView: View {
                         }
                     }
                 }
-            } else {
-                // Ollama — no key needed, just check if it's running
+            } else if !tm.selectedProvider.requiresAPIKey {
+                // Ollama
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.caption2)
