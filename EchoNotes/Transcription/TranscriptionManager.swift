@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os
 
@@ -55,6 +56,14 @@ final class TranscriptionManager: ObservableObject {
 
     /// OAuth manager for ChatGPT login
     let oauthManager = OAuthManager()
+    private var oauthCancellable: AnyCancellable?
+
+    init() {
+        // Forward OAuthManager changes to trigger SwiftUI updates
+        oauthCancellable = oauthManager.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
