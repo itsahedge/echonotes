@@ -8,6 +8,7 @@ final class OAuthCallbackServer: @unchecked Sendable {
     private let port: UInt16
     private let onCallback: @Sendable (String, String) -> Void // (code, state)
     private var listener: NWListener?
+    private var callbackFired = false
 
     init(port: UInt16, onCallback: @escaping @Sendable (String, String) -> Void) {
         self.port = port
@@ -98,6 +99,16 @@ final class OAuthCallbackServer: @unchecked Sendable {
                 self.sendResponse(connection: connection, status: "400 Bad Request", body: "Missing code or state")
                 return
             }
+
+            // Only fire callback once (browser may retry / prefetch)
+            guard !self.callbackFired else {
+                self.logger.info("Callback already fired, ignoring duplicate")
+                self.sendResponse(connection: connection, status: "200 OK", body: self.successHTML())
+                return
+            }
+            self.callbackFired = true
+
+            self.logger.info("OAuth callback received with code, firing handler")
 
             // Send success page to browser
             self.sendResponse(connection: connection, status: "200 OK", body: self.successHTML())

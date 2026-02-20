@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os
 
@@ -55,11 +56,19 @@ final class TranscriptionManager: ObservableObject {
 
     /// OAuth manager for ChatGPT login
     let oauthManager = OAuthManager()
+    private var oauthCancellable: AnyCancellable?
+
+    init() {
+        // Forward OAuthManager changes to trigger SwiftUI updates
+        oauthCancellable = oauthManager.objectWillChange.sink { [weak self] _ in
+            self?.objectWillChange.send()
+        }
+    }
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
-        // If using OpenAI with OAuth token, check that
-        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, tokens.apiKey != nil {
+        // OAuth: either API key or access token via ChatGPT backend
+        if selectedProvider == .openai, oauthManager.isAuthenticated {
             return true
         }
         if selectedProvider.requiresAPIKey {
@@ -70,14 +79,31 @@ final class TranscriptionManager: ObservableObject {
 
     /// Build an AIService.Configuration from current settings.
     func aiConfiguration() -> AIService.Configuration {
-        // Prefer OAuth API key for OpenAI if available
-        var apiKey = openaiAPIKey
-        if selectedProvider == .openai, let tokens = oauthManager.storedTokens, let oauthKey = tokens.apiKey {
-            apiKey = oauthKey
+        // Prefer OAuth for OpenAI if available
+        if selectedProvider == .openai, let tokens = oauthManager.storedTokens {
+            if let apiKey = tokens.apiKey {
+                // Has platform API key — use standard OpenAI endpoint
+                return AIService.Configuration(
+                    apiKey: apiKey,
+                    model: selectedAIModel,
+                    endpoint: URL(string: selectedProvider.defaultEndpoint)!,
+                    provider: selectedProvider
+                )
+            } else {
+                // No API key — use access token against ChatGPT backend
+                // (Responses API at chatgpt.com/backend-api/codex/responses)
+                return AIService.Configuration(
+                    apiKey: tokens.accessToken,
+                    model: "gpt-5.2-codex",
+                    endpoint: URL(string: "https://chatgpt.com/backend-api/codex/responses")!,
+                    provider: selectedProvider,
+                    chatgptAccountId: tokens.accountId
+                )
+            }
         }
 
         return AIService.Configuration(
-            apiKey: apiKey,
+            apiKey: openaiAPIKey,
             model: selectedAIModel,
             endpoint: URL(string: selectedProvider.defaultEndpoint)!,
             provider: selectedProvider

@@ -37,17 +37,24 @@ final class AIService: Sendable {
         let model: String
         let endpoint: URL
         let provider: AIProvider
+        let chatgptAccountId: String?
 
-        init(apiKey: String, model: String = "gpt-4o-mini", endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!, provider: AIProvider = .openai) {
+        init(apiKey: String, model: String = "gpt-4o-mini", endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!, provider: AIProvider = .openai, chatgptAccountId: String? = nil) {
             self.apiKey = apiKey
             self.model = model
             self.endpoint = endpoint
             self.provider = provider
+            self.chatgptAccountId = chatgptAccountId
         }
     }
 
     /// Summarize a transcript using the configured AI provider.
     func summarize(transcript: String, config: Configuration) async throws -> MeetingSummary {
+        // Use ChatGPT backend Responses API when we have an account ID but no API key
+        if config.chatgptAccountId != nil {
+            return try await summarizeChatGPTBackend(transcript: transcript, config: config)
+        }
+
         switch config.provider {
         case .anthropic:
             return try await summarizeAnthropic(transcript: transcript, config: config)
@@ -57,6 +64,136 @@ final class AIService: Sendable {
             // OpenAI-compatible (OpenAI, Ollama)
             return try await summarizeOpenAICompatible(transcript: transcript, config: config)
         }
+    }
+
+    // MARK: - ChatGPT Backend (Responses API)
+
+    /// Use the ChatGPT backend Responses API with OAuth access token.
+    /// Same approach as Codex CLI: Bearer access_token + chatgpt-account-id header.
+    /// The Codex backend requires stream: true, so we collect SSE events.
+    private func summarizeChatGPTBackend(transcript: String, config: Configuration) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript)
+        let systemPrompt = "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."
+
+        let requestBody: [String: Any] = [
+            "model": config.model,
+            "instructions": systemPrompt,
+            "input": [
+                ["role": "user", "content": prompt]
+            ],
+            "store": false,
+            "stream": true,
+        ]
+
+        let url = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let accountId = config.chatgptAccountId {
+            request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        request.timeoutInterval = 120
+
+        // Stream the response and collect text deltas
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            // Read the error body
+            var errorData = Data()
+            for try await byte in bytes { errorData.append(byte) }
+            let body = String(data: errorData, encoding: .utf8) ?? "unknown"
+            throw AIError.apiError(statusCode: httpResponse.statusCode, message: body)
+        }
+
+        // Parse SSE events to collect the full text output
+        var fullText = ""
+        for try await line in bytes.lines {
+            // SSE format: "data: {...}" or "data: [DONE]"
+            guard line.hasPrefix("data: ") else { continue }
+            let payload = String(line.dropFirst(6))
+            if payload == "[DONE]" { break }
+
+            guard let eventData = payload.data(using: .utf8),
+                  let event = try? JSONSerialization.jsonObject(with: eventData) as? [String: Any] else { continue }
+
+            // Look for text delta events: response.output_text.delta
+            if let type = event["type"] as? String, type == "response.output_text.delta",
+               let delta = event["delta"] as? String {
+                fullText += delta
+            }
+
+            // Also check for response.completed which has the final output_text
+            if let type = event["type"] as? String, type == "response.completed",
+               let resp = event["response"] as? [String: Any],
+               let outputText = resp["output_text"] as? String {
+                fullText = outputText
+            }
+        }
+
+        guard !fullText.isEmpty else {
+            throw AIError.invalidResponse
+        }
+
+        // Parse the collected text as JSON
+        var cleaned = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let summaryData = cleaned.data(using: .utf8) else {
+            throw AIError.invalidResponse
+        }
+        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+    }
+
+    /// Parse the OpenAI Responses API format.
+    /// Response contains `output_text` (shorthand) and/or `output` array with message items.
+    func parseChatGPTResponse(_ data: Data) throws -> MeetingSummary {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AIError.invalidResponse
+        }
+
+        // Try output_text shorthand first
+        var text: String?
+        if let outputText = json["output_text"] as? String {
+            text = outputText
+        }
+
+        // Fall back to parsing the output array
+        if text == nil, let output = json["output"] as? [[String: Any]] {
+            for item in output {
+                guard let type = item["type"] as? String, type == "message",
+                      let content = item["content"] as? [[String: Any]] else { continue }
+                for block in content {
+                    guard let blockType = block["type"] as? String, blockType == "output_text",
+                          let blockText = block["text"] as? String else { continue }
+                    text = blockText
+                    break
+                }
+                if text != nil { break }
+            }
+        }
+
+        guard var cleaned = text?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+            throw AIError.invalidResponse
+        }
+
+        // Strip markdown code fences if present
+        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
+        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
+        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let summaryData = cleaned.data(using: .utf8) else {
+            throw AIError.invalidResponse
+        }
+        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
     }
 
     // MARK: - OpenAI-compatible (OpenAI, Ollama)
@@ -83,6 +220,9 @@ final class AIService: Sendable {
         request.httpMethod = "POST"
         request.setValue(config.provider.authHeaderValue(apiKey: config.apiKey), forHTTPHeaderField: config.provider.authHeaderName)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let accountId = config.chatgptAccountId {
+            request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         request.timeoutInterval = 120
 

@@ -35,6 +35,7 @@ final class OAuthManager: ObservableObject {
         var refreshToken: String
         var idToken: String
         var apiKey: String?
+        var accountId: String?
         var email: String?
         var expiresAt: Date?
 
@@ -92,6 +93,7 @@ final class OAuthManager: ObservableObject {
 
     /// Start the OAuth login flow.
     func login() {
+        logger.info("Starting OAuth login flow")
         isAuthenticating = true
         error = nil
 
@@ -178,8 +180,10 @@ final class OAuthManager: ObservableObject {
 
             let (data, response) = try await URLSession.shared.data(for: request)
 
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let httpStatus = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard httpStatus == 200 else {
                 let body = String(data: data, encoding: .utf8) ?? "unknown"
+                logger.error("Token exchange HTTP \(httpStatus, privacy: .public): \(body, privacy: .public)")
                 throw OAuthError.tokenExchangeFailed("Token exchange failed: \(body)")
             }
 
@@ -190,11 +194,25 @@ final class OAuthManager: ObservableObject {
             }
             let tokens = try JSONDecoder().decode(TokenResponse.self, from: data)
 
-            // Step 2: Exchange id_token for an API key
-            let apiKey = try await exchangeForAPIKey(idToken: tokens.id_token)
+            // Parse JWT for email and account ID
+            let claims = Self.parseJWT(tokens.id_token)
+            // Also check access_token for account_id (Codex uses this)
+            let accessClaims = Self.parseJWT(tokens.access_token)
+            let accountId = claims.accountId ?? accessClaims.accountId
 
-            // Extract email from id_token JWT
-            let email = Self.extractEmailFromJWT(tokens.id_token)
+            // Debug: log full JWT claims to diagnose token exchange failure
+            logger.info("id_token claims: \(Self.debugJWTClaims(tokens.id_token), privacy: .public)")
+            logger.info("access_token claims: \(Self.debugJWTClaims(tokens.access_token), privacy: .public)")
+
+            // Step 2: Try to exchange id_token for an API key.
+            // This fails for ChatGPT-only accounts — that's fine,
+            // we'll use the access token against the ChatGPT backend instead.
+            var apiKey: String?
+            do {
+                apiKey = try await exchangeForAPIKey(idToken: tokens.id_token)
+            } catch {
+                logger.warning("API key exchange failed, will use ChatGPT backend: \(error.localizedDescription, privacy: .public)")
+            }
 
             // Store everything
             let stored = OAuthTokens(
@@ -202,17 +220,24 @@ final class OAuthManager: ObservableObject {
                 refreshToken: tokens.refresh_token,
                 idToken: tokens.id_token,
                 apiKey: apiKey,
-                email: email,
+                accountId: accountId,
+                email: claims.email,
                 expiresAt: Date().addingTimeInterval(3600 * 8) // ~8 hours
             )
             saveTokens(stored)
 
+            // Always mark as authenticated — with API key we use the standard API,
+            // without it we use the ChatGPT backend Responses API (like Codex CLI)
             isAuthenticated = true
-            userEmail = email
-            logger.info("OAuth login successful for \(email ?? "unknown")")
+            userEmail = claims.email
+            if apiKey != nil {
+                logger.info("OAuth login successful with API key for \(claims.email ?? "unknown", privacy: .public)")
+            } else {
+                logger.info("OAuth login successful via ChatGPT backend for \(claims.email ?? "unknown", privacy: .public)")
+            }
         } catch {
             self.error = error.localizedDescription
-            logger.error("OAuth error: \(error.localizedDescription)")
+            logger.error("OAuth error: \(error.localizedDescription, privacy: .public)")
         }
 
         isAuthenticating = false
@@ -284,20 +309,22 @@ final class OAuthManager: ObservableObject {
             }
             let refreshed = try JSONDecoder().decode(RefreshResponse.self, from: data)
 
-            // Get new API key
-            let apiKey = try await exchangeForAPIKey(idToken: refreshed.id_token)
-            let email = Self.extractEmailFromJWT(refreshed.id_token)
+            let apiKey = try? await exchangeForAPIKey(idToken: refreshed.id_token)
+            let claims = Self.parseJWT(refreshed.id_token)
+            let accessClaims = Self.parseJWT(refreshed.access_token)
+            let accountId = claims.accountId ?? accessClaims.accountId
 
             let updated = OAuthTokens(
                 accessToken: refreshed.access_token,
                 refreshToken: refreshed.refresh_token,
                 idToken: refreshed.id_token,
                 apiKey: apiKey,
-                email: email,
+                accountId: accountId,
+                email: claims.email,
                 expiresAt: Date().addingTimeInterval(3600 * 8)
             )
             saveTokens(updated)
-            userEmail = email
+            userEmail = claims.email
             logger.info("Token refresh successful")
         } catch {
             logger.error("Token refresh failed: \(error.localizedDescription)")
@@ -324,21 +351,62 @@ final class OAuthManager: ObservableObject {
 
     // MARK: - JWT Parsing
 
+    struct JWTClaims {
+        var email: String?
+        var accountId: String?
+    }
+
     nonisolated static func extractEmailFromJWT(_ jwt: String) -> String? {
+        parseJWT(jwt).email
+    }
+
+    nonisolated static func parseJWT(_ jwt: String) -> JWTClaims {
         let parts = jwt.split(separator: ".")
-        guard parts.count >= 2 else { return nil }
+        guard parts.count >= 2 else { return JWTClaims() }
 
         var payload = String(parts[1])
-        // Add padding if needed
         while payload.count % 4 != 0 { payload += "=" }
         payload = payload.replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
 
         guard let data = Data(base64Encoded: payload),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return nil
+            return JWTClaims()
         }
-        return json["email"] as? String
+
+        let email = json["email"] as? String
+
+        // OpenAI nests auth claims under "https://api.openai.com/auth"
+        let authClaims = json["https://api.openai.com/auth"] as? [String: Any]
+        let accountId = authClaims?["chatgpt_account_id"] as? String
+
+        return JWTClaims(email: email, accountId: accountId)
+    }
+
+    /// Debug: return all JWT claim keys (not values) for logging
+    nonisolated static func debugJWTClaims(_ jwt: String) -> String {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return "invalid JWT" }
+
+        var payload = String(parts[1])
+        while payload.count % 4 != 0 { payload += "=" }
+        payload = payload.replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+
+        guard let data = Data(base64Encoded: payload),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return "failed to decode"
+        }
+
+        // Log keys and the auth sub-object keys
+        var result = "keys: \(json.keys.sorted().joined(separator: ", "))"
+        if let auth = json["https://api.openai.com/auth"] as? [String: Any] {
+            result += " | auth keys: \(auth.keys.sorted().joined(separator: ", "))"
+            // Also log org-related values
+            if let orgId = auth["organization_id"] as? String { result += " | org_id: \(orgId)" }
+            if let acctId = auth["chatgpt_account_id"] as? String { result += " | acct_id: \(acctId)" }
+        }
+        return result
     }
 }
 
