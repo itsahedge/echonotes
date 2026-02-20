@@ -1,5 +1,4 @@
 import Foundation
-import SwiftUI
 import os
 
 /// How transcription should be performed.
@@ -27,8 +26,13 @@ final class TranscriptionManager: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: MeetingSummary?
 
-    /// OpenAI API key — stored in UserDefaults (app-sandboxed, local only).
-    @AppStorage("openaiAPIKey") var openaiAPIKey: String = ""
+    private static let apiKeyDefaultsKey = "openaiAPIKey"
+
+    /// OpenAI API key — stored in UserDefaults, synced via @Published for SwiftUI.
+    /// Note: @AppStorage inside ObservableObject causes re-render loops. Use @Published + manual sync.
+    @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(openaiAPIKey, forKey: Self.apiKeyDefaultsKey) }
+    }
 
     let modelManager = ModelManager()
     let streamingTranscriber = StreamingTranscriber()
