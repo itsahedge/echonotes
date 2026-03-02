@@ -60,6 +60,8 @@ final class RecordingEngine: ObservableObject {
     func startRecording() async {
         guard !isRecording else { return }
         errorMessage = nil
+        // Clear any previous microphone warnings
+        micCapture.clearWarning()
 
         // Check permissions
         if let permissionError = await PermissionChecker.checkPermissionsWithMessage() {
@@ -108,6 +110,12 @@ final class RecordingEngine: ObservableObject {
                 Task { @MainActor in
                     self?.errorMessage = "System audio error: \(error.localizedDescription)"
                     await self?.stopRecording()
+                }
+            }
+
+            micCapture.onWarning = { [weak self] message in
+                Task { @MainActor in
+                    self?.errorMessage = message
                 }
             }
 

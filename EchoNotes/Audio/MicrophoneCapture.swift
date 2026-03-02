@@ -3,9 +3,16 @@ import os
 
 /// Captures microphone audio using AVAudioEngine.
 /// Outputs mono Float32 PCM at the requested sample rate.
+/// Handles microphone disconnection gracefully by continuing to capture with silence.
 final class MicrophoneCapture: @unchecked Sendable {
     var onBuffer: ((SourcedAudioBuffer) -> Void)?
     var onError: ((Error) -> Void)?
+    var onWarning: ((String) -> Void)?
+    var hasWarning: Bool { _hasWarning.withLock { $0 } }
+
+    func clearWarning() {
+        _hasWarning.withLock { $0 = false }
+    }
 
     private let engine = AVAudioEngine()
     private let lock = NSLock()
@@ -14,6 +21,10 @@ final class MicrophoneCapture: @unchecked Sendable {
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
     private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
     private var configObserver: NSObjectProtocol?
+    private var _hasWarning = OSAllocatedUnfairLock(initialState: false)
+    private let maxBufferLag = Int(AudioConfig.sampleRate) * 10
+    private var disconnectedSamples: [Float] = []
+    private var disconnectedOffset = 0
 
     func startCapture(sampleRate: Double = AudioConfig.sampleRate) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
@@ -22,7 +33,14 @@ final class MicrophoneCapture: @unchecked Sendable {
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
-        guard inputFormat.sampleRate > 0 else { throw MicrophoneError.noInputDevice }
+        guard inputFormat.sampleRate > 0 else { 
+            // No input device - start in disconnected state
+            self._hasWarning.withLock { $0 = true }
+            self.logger.warning("No microphone input device - recording will continue with system audio only")
+            self.onWarning?("No microphone input device - recording will continue with system audio only")
+            _isCapturing.withLock { $0 = true }
+            return
+        }
 
         let conv = AVAudioConverter(from: inputFormat, to: fmt)
         guard conv != nil else { throw MicrophoneError.converterCreationFailed }
@@ -53,9 +71,11 @@ final class MicrophoneCapture: @unchecked Sendable {
                 return false
             }
             if wasCapturing {
-                let error = MicrophoneError.deviceDisconnected
-                self.logger.error("Microphone configuration changed, engine stopped: \(error.localizedDescription)")
-                self.onError?(error)
+                self._hasWarning.withLock { $0 = true }
+                self.logger.warning("Microphone disconnected - recording will continue with system audio only")
+                self.onWarning?("Microphone disconnected - recording will continue with system audio only")
+                // Stop the engine but keep the capture object alive
+                self.engine.stop()
             }
         }
 
@@ -67,9 +87,28 @@ final class MicrophoneCapture: @unchecked Sendable {
     func stopCapture() {
         guard _isCapturing.withLock({ $0 }) else { return }
         
+        _isCapturing.withLock { $0 = false }
+        
         if let observer = configObserver {
             NotificationCenter.default.removeObserver(observer)
             configObserver = nil
+        }
+        
+        if !engine.isRunning {
+            // Engine already stopped due to disconnection - pad with silence
+            lock.lock()
+            let sysAvailable = disconnectedSamples.count - disconnectedOffset
+            let micAvailable = disconnectedSamples.count - disconnectedOffset
+            
+            // Pad the shorter stream with silence
+            let maxCount = max(sysAvailable, micAvailable)
+            if maxCount > 0 {
+                while (disconnectedSamples.count - disconnectedOffset) < maxCount {
+                    disconnectedSamples.append(0)
+                }
+            }
+            lock.unlock()
+            return
         }
         
         engine.inputNode.removeTap(onBus: 0)
@@ -79,8 +118,6 @@ final class MicrophoneCapture: @unchecked Sendable {
         converter = nil
         targetFormat = nil
         lock.unlock()
-
-        _isCapturing.withLock { $0 = false }
     }
 
     private func processBuffer(_ buffer: AVAudioPCMBuffer) {
