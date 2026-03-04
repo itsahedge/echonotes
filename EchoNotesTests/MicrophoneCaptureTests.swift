@@ -31,7 +31,7 @@ struct MicrophoneCaptureTests {
         // Start capture - if no device is available, it should enter disconnected state
         // Note: This test behavior depends on system state
         do {
-            try await capture.startCapture(sampleRate: 48000)
+            try capture.startCapture(sampleRate: 48000)
             
             // Give it a moment to initialize
             try await Task.sleep(nanoseconds: 100_000_000) // 100ms
@@ -55,7 +55,7 @@ struct MicrophoneCaptureTests {
         // Start and stop multiple times to verify cleanup works
         for _ in 0..<3 {
             do {
-                try await capture.startCapture(sampleRate: 48000)
+                try capture.startCapture(sampleRate: 48000)
                 try await Task.sleep(nanoseconds: 50_000_000) // 50ms
             } catch {
                 // Continue even if start fails
@@ -91,7 +91,7 @@ struct MicrophoneCaptureTests {
         
         for i in 0..<5 {
             do {
-                try await capture.startCapture(sampleRate: 48000)
+                try capture.startCapture(sampleRate: 48000)
                 _ = i // Use variable to avoid unused warning
                 try await Task.sleep(nanoseconds: 25_000_000) // 25ms
             } catch {
