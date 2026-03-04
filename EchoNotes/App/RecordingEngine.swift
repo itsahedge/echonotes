@@ -105,6 +105,9 @@ final class RecordingEngine: ObservableObject {
 
             audioWriter = writer
 
+            // Clear any previous microphone warnings
+            micCapture.clearWarning()
+
             // Surface audio capture errors to the UI
             systemCapture.onError = { [weak self] error in
                 Task { @MainActor in
@@ -123,6 +126,16 @@ final class RecordingEngine: ObservableObject {
                 Task { @MainActor in
                     self?.errorMessage = "Microphone error: \(error.localizedDescription)"
                     await self?.stopRecording()
+                }
+            }
+
+            // Surface microphone warnings (non-fatal, recording continues)
+            micCapture.onWarning = { [weak self] warning in
+                Task { @MainActor in
+                    // Don't overwrite existing errors with warnings
+                    if self?.errorMessage == nil {
+                        self?.errorMessage = warning
+                    }
                 }
             }
 
