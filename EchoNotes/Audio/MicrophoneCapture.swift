@@ -22,9 +22,8 @@ final class MicrophoneCapture: @unchecked Sendable {
     private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
     private var configObserver: NSObjectProtocol?
     private var _hasWarning = OSAllocatedUnfairLock(initialState: false)
-    private let maxBufferLag = Int(AudioConfig.sampleRate) * 10
-    private var disconnectedSamples: [Float] = []
-    private var disconnectedOffset = 0
+    private var isDisconnected = false
+    private var silenceTimer: Timer?
 
     func startCapture(sampleRate: Double = AudioConfig.sampleRate) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
@@ -71,11 +70,15 @@ final class MicrophoneCapture: @unchecked Sendable {
                 return false
             }
             if wasCapturing {
+                guard !self.isDisconnected else { return } // Already handling disconnection
+                self.isDisconnected = true
                 self._hasWarning.withLock { $0 = true }
                 self.logger.warning("Microphone disconnected - recording will continue with system audio only")
                 self.onWarning?("Microphone disconnected - recording will continue with system audio only")
-                // Stop the engine but keep the capture object alive
+                
+                // Stop the engine but keep feeding silence to onBuffer to stay in sync
                 self.engine.stop()
+                self.startSilenceFeed()
             }
         }
 
@@ -94,19 +97,18 @@ final class MicrophoneCapture: @unchecked Sendable {
             configObserver = nil
         }
         
-        if !engine.isRunning {
-            // Engine already stopped due to disconnection - pad with silence
+        if isDisconnected {
+            // Engine was stopped due to disconnection - stop the silence feed
+            silenceTimer?.invalidate()
+            silenceTimer = nil
+            isDisconnected = false
+        }
+        
+        guard engine.isRunning else {
+            // Engine not running but not in disconnected state - cleanup and return
             lock.lock()
-            let sysAvailable = disconnectedSamples.count - disconnectedOffset
-            let micAvailable = disconnectedSamples.count - disconnectedOffset
-            
-            // Pad the shorter stream with silence
-            let maxCount = max(sysAvailable, micAvailable)
-            if maxCount > 0 {
-                while (disconnectedSamples.count - disconnectedOffset) < maxCount {
-                    disconnectedSamples.append(0)
-                }
-            }
+            converter = nil
+            targetFormat = nil
             lock.unlock()
             return
         }
@@ -150,6 +152,18 @@ final class MicrophoneCapture: @unchecked Sendable {
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(outputBuffer.frameLength)))
 
         onBuffer?(SourcedAudioBuffer(samples: samples, source: .microphone))
+    }
+    
+    /// Starts feeding silence buffers to onBuffer to keep stereo file synchronized
+    private func startSilenceFeed() {
+        // Feed silence at ~48kHz, matching the audio writer's expected rate
+        // Using 4096-sample chunks to match the tap buffer size
+        let bufferSize = 4096
+        silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.085, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let silence = Array(repeating: Float(0.0), count: bufferSize)
+            self.onBuffer?(SourcedAudioBuffer(samples: silence, source: .microphone))
+        }
     }
 }
 
