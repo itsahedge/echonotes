@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct CustomProvidersSettingsView: View {
-    @EnvironmentObject var tm: TranscriptionManager
-    @EnvironmentObject var recorder: RecordingEngine
+    @ObservedObject var tm: TranscriptionManager
+    @ObservedObject var recorder: RecordingEngine
     @StateObject private var providerStore = CustomProviderStore()
     
     @State private var showAddSheet = false
@@ -192,13 +192,7 @@ struct AddCustomProviderSheet: View {
             modelOptions: models
         )
         
-        if let existing = providerStore.providers.first(where: { $0.id == UUID().uuidString }) {
-            // This is a new provider, not an edit
-            providerStore.add(provider)
-        } else {
-            providerStore.add(provider)
-        }
-        
+        providerStore.add(provider)
         dismiss()
     }
 }

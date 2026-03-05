@@ -15,6 +15,11 @@ import os
 final class SystemAudioCapture: NSObject, @unchecked Sendable {
     var onBuffer: ((SourcedAudioBuffer) -> Void)?
     var onError: ((Error) -> Void)?
+    
+    static func availableDevices() -> [String] {
+        // Return empty array - system audio doesn't have selectable devices on macOS
+        return []
+    }
 
     private var stream: SCStream?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)

@@ -5,46 +5,70 @@ struct GeneralSettingsView: View {
     @ObservedObject var recorder: RecordingEngine
     
     var body: some View {
-        Form {
-            Section("Recording") {
-                Picker("Transcription Mode", selection: $recorder.transcriptionModeRaw) {
-                    ForEach(TranscriptionMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.rawValue).tag(mode.rawValue)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                SectionView(title: "Recording") {
+                    Picker("Transcription Mode", selection: $recorder.transcriptionModeRaw) {
+                        ForEach(TranscriptionMode.allCases, id: \.rawValue) { mode in
+                            Text(mode.rawValue).tag(mode.rawValue)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                
-                if recorder.transcriptionMode == .postRecording {
-                    Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
-                }
-            }
-            
-            Section("Whisper Model") {
-                Picker("Model", selection: $tm.selectedModel) {
-                    ForEach(WhisperModel.allCases, id: \.self) { model in
-                        Text(model.rawValue).tag(model)
-                    }
-                }
-            }
-            
-            Section("Audio") {
-                Picker("Microphone", selection: $recorder.selectedSourceId) {
-                    Text("System Default").tag("")
-                    ForEach(recorder.availableSources, id: \.self) { source in
-                        Text(source).tag(source)
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: .infinity)
+                    
+                    if recorder.transcriptionMode == .postRecording {
+                        Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
                     }
                 }
                 
-                Picker("System Audio Source", selection: $recorder.selectedSystemSourceId) {
-                    Text("Disabled").tag("")
-                    ForEach(recorder.availableSystemSources, id: \.self) { source in
-                        Text(source).tag(source)
+                SectionView(title: "Whisper Model") {
+                    Picker("Model", selection: $tm.selectedModel) {
+                        ForEach(WhisperModel.allCases, id: \.self) { model in
+                            Text(model.rawValue).tag(model)
+                        }
                     }
+                    .frame(maxWidth: .infinity)
+                }
+                
+                SectionView(title: "Audio") {
+                    Picker("Microphone", selection: $recorder.selectedSourceId) {
+                        Text("System Default").tag("")
+                        ForEach(recorder.availableSources, id: \.self) { source in
+                            Text(source).tag(source)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    Picker("System Audio Source", selection: $recorder.selectedSystemSourceId) {
+                        Text("Disabled").tag("")
+                        ForEach(recorder.availableSystemSources, id: \.self) { source in
+                            Text(source).tag(source)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
             }
+            .padding()
         }
-        .formStyle(.grouped)
-        .padding()
+    }
+}
+
+struct SectionView<Content: View>: View {
+    let title: String
+    let content: Content
+    
+    init(title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.headline)
+            
+            content
+        }
     }
 }
 

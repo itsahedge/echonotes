@@ -27,6 +27,16 @@ final class RecordingEngine: ObservableObject {
     @Published var lastRecordingURL: URL?
     @AppStorage("autoTranscribe") var autoTranscribe = false
     @AppStorage("transcriptionMode") var transcriptionModeRaw: String = TranscriptionMode.postRecording.rawValue
+    @AppStorage("selectedMicrophone") var selectedSourceId: String = ""
+    @AppStorage("selectedSystemSource") var selectedSystemSourceId: String = ""
+    
+    var availableSources: [String] {
+        MicrophoneCapture.availableDevices()
+    }
+    
+    var availableSystemSources: [String] {
+        SystemAudioCapture.availableDevices()
+    }
 
     var transcriptionMode: TranscriptionMode {
         get { TranscriptionMode(rawValue: transcriptionModeRaw) ?? .postRecording }

@@ -72,7 +72,7 @@ struct SettingsSectionView: View {
             case .aiProviders:
                 AIProvidersSettingsView(tm: tm)
             case .customProviders:
-                CustomProvidersSettingsView(tm: tm)
+                CustomProvidersSettingsView(tm: tm, recorder: recorder)
             case .about:
                 AboutSettingsView()
             }

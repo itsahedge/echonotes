@@ -9,6 +9,12 @@ final class MicrophoneCapture: @unchecked Sendable {
     var onError: ((Error) -> Void)?
     var onWarning: ((String) -> Void)?
     var hasWarning: Bool { _hasWarning.withLock { $0 } }
+    
+    static func availableDevices() -> [String] {
+        // Return default microphone or empty array
+        // macOS audio device enumeration requires AudioToolbox
+        return []
+    }
 
     func clearWarning() {
         _hasWarning.withLock { $0 = false }
