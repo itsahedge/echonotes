@@ -43,13 +43,26 @@ struct RecordingDetailView: View {
                 if let transcript {
                     transcriptSection(transcript)
                 } else {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 12) {
                         Image(systemName: "text.badge.xmark")
                             .font(.title2)
                             .foregroundStyle(.tertiary)
                         Text("No transcript available")
                             .font(.body)
                             .foregroundStyle(.tertiary)
+
+                        Button(action: {
+                            Task { await tm.transcribe(audioURL: entry.url) }
+                        }) {
+                            HStack {
+                                Image(systemName: "text.bubble")
+                                Text("Transcribe")
+                            }
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 24)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(tm.isTranscribing)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 40)
@@ -93,6 +106,12 @@ struct RecordingDetailView: View {
             transcript = entry.loadTranscript()
             if let existing = existingSummary {
                 summary = existing
+            }
+        }
+        .onChange(of: tm.isTranscribing) { _, isTranscribing in
+            if !isTranscribing {
+                // Reload transcript after transcription completes
+                transcript = entry.loadTranscript()
             }
         }
     }
