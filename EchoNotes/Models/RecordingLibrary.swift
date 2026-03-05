@@ -3,7 +3,7 @@ import Foundation
 import os
 
 /// A single recording entry in the library.
-struct RecordingEntry: Identifiable, Sendable {
+struct RecordingEntry: Identifiable, Hashable, Sendable {
     let id: URL
     let url: URL
     let date: Date
@@ -15,6 +15,14 @@ struct RecordingEntry: Identifiable, Sendable {
     let hasTranscript: Bool
 
     var filename: String { url.lastPathComponent }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: RecordingEntry, rhs: RecordingEntry) -> Bool {
+        lhs.id == rhs.id
+    }
 
     /// Load a Transcript from the associated .json file, falling back to .txt if needed.
     func loadTranscript() -> Transcript? {

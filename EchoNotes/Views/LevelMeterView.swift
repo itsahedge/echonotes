@@ -17,7 +17,7 @@ struct LevelMeterView: View {
                         .animation(.linear(duration: 0.1), value: level)
                 }
             }
-            .frame(height: 8)
+            .frame(height: 14)
             Text(label).font(.caption2).foregroundStyle(.secondary)
         }
     }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Settings page for app configuration (AI provider, model, OAuth, etc).
 struct SettingsView: View {
     @ObservedObject var tm: TranscriptionManager
-    let onBack: () -> Void
+    var onBack: (() -> Void)? = nil
 
     @State private var apiKeyInput: String = ""
     @State private var showKey = false
@@ -11,23 +11,24 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            // Header
-            HStack {
-                Button(action: onBack) {
-                    Image(systemName: "chevron.left")
-                        .font(.caption)
+            if let onBack {
+                // Header (only shown when used standalone)
+                HStack {
+                    Button(action: onBack) {
+                        Image(systemName: "chevron.left")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    Text("Settings")
+                        .font(.headline)
+                    Spacer()
                 }
-                .buttonStyle(.plain)
-                Text("Settings")
-                    .font(.headline)
-                Spacer()
             }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     oauthSection
                     aiProviderSection
-                    aboutSection
                 }
             }
         }
@@ -44,44 +45,40 @@ struct SettingsView: View {
                 .font(.subheadline.bold())
 
             Text("Sign in with your existing ChatGPT subscription instead of an API key. Your Plus/Pro plan includes API access.")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
 
             if tm.oauthManager.isAuthenticated {
-                // Signed in state
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundStyle(.green)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Signed in with ChatGPT")
-                            .font(.caption.bold())
+                            .font(.callout.bold())
                         if let email = tm.oauthManager.userEmail {
                             Text(email)
-                                .font(.caption2)
+                                .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
                     }
                     Spacer()
                     Button(action: { tm.oauthManager.logout() }) {
                         Text("Sign Out")
-                            .font(.caption)
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
             } else {
-                // Sign in button
                 Button(action: { tm.oauthManager.login() }) {
                     HStack(spacing: 6) {
                         if tm.oauthManager.isAuthenticating {
                             ProgressView().controlSize(.mini)
-                            Text("Waiting for browser…")
+                            Text("Waiting for browser...")
                         } else {
                             Image(systemName: "arrow.right.circle.fill")
                             Text("Sign in with ChatGPT")
                         }
                     }
-                    .font(.caption)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
                 }
@@ -90,7 +87,7 @@ struct SettingsView: View {
 
                 if let error = tm.oauthManager.error {
                     Text(error)
-                        .font(.caption2)
+                        .font(.callout)
                         .foregroundStyle(.red)
                 }
             }
@@ -110,22 +107,22 @@ struct SettingsView: View {
             if tm.oauthManager.isAuthenticated && tm.selectedProvider == .openai {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.caption2)
+                        .font(.callout)
                         .foregroundStyle(.green)
                     Text("Using your ChatGPT account for OpenAI API access")
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
             } else {
                 Text("Choose an AI provider for meeting summaries. Your API key is stored locally and never sent anywhere except the provider's API.")
-                    .font(.caption)
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
 
             // Provider picker
             VStack(alignment: .leading, spacing: 6) {
                 Text("Provider")
-                    .font(.caption.bold())
+                    .font(.callout.bold())
                     .foregroundStyle(.secondary)
 
                 Picker("", selection: $tm.selectedProvider) {
@@ -145,7 +142,7 @@ struct SettingsView: View {
             // Model picker
             VStack(alignment: .leading, spacing: 6) {
                 Text("Model")
-                    .font(.caption.bold())
+                    .font(.callout.bold())
                     .foregroundStyle(.secondary)
 
                 Picker("", selection: $tm.selectedAIModel) {
@@ -160,7 +157,7 @@ struct SettingsView: View {
             if tm.selectedProvider.requiresAPIKey && !(tm.oauthManager.isAuthenticated && tm.selectedProvider == .openai) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("API Key")
-                        .font(.caption.bold())
+                        .font(.callout.bold())
                         .foregroundStyle(.secondary)
 
                     HStack(spacing: 6) {
@@ -171,12 +168,10 @@ struct SettingsView: View {
                                 SecureField(tm.selectedProvider.apiKeyPlaceholder, text: $apiKeyInput)
                             }
                         }
-                        .font(.caption)
                         .textFieldStyle(.roundedBorder)
 
                         Button(action: { showKey.toggle() }) {
                             Image(systemName: showKey ? "eye.slash" : "eye")
-                                .font(.caption2)
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)
@@ -188,8 +183,7 @@ struct SettingsView: View {
                             saved = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
                         }) {
-                            Text(saved ? "Saved ✓" : "Save")
-                                .font(.caption)
+                            Text(saved ? "Saved" : "Save")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -201,7 +195,6 @@ struct SettingsView: View {
                                 apiKeyInput = ""
                             }) {
                                 Text("Remove Key")
-                                    .font(.caption)
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -212,37 +205,20 @@ struct SettingsView: View {
 
                         if tm.isAIConfigured {
                             Label("Active", systemImage: "checkmark.circle.fill")
-                                .font(.caption2)
+                                .font(.callout)
                                 .foregroundStyle(.green)
                         }
                     }
                 }
             } else if !tm.selectedProvider.requiresAPIKey {
-                // Ollama
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.caption2)
                         .foregroundStyle(.green)
                     Text("No API key needed — make sure Ollama is running locally")
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
             }
-        }
-        .padding(12)
-        .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
-    }
-
-    // MARK: - About Section
-
-    private var aboutSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label("About", systemImage: "info.circle")
-                .font(.caption.bold())
-            Text("EchoNotes — local-first meeting recorder with on-device transcription via WhisperKit.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
         .padding(12)
         .background(Color.secondary.opacity(0.05))

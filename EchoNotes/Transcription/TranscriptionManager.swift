@@ -32,6 +32,7 @@ final class TranscriptionManager: ObservableObject {
     private static let apiKeyDefaultsKey = "openaiAPIKey"
     private static let providerDefaultsKey = "aiProvider"
     private static let aiModelDefaultsKey = "aiModel"
+    private static let whisperModelDefaultsKey = "whisperModel"
 
     /// API key for the selected AI provider.
     @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
@@ -115,8 +116,16 @@ final class TranscriptionManager: ObservableObject {
     private var whisperEngine: WhisperEngine?
     private var transcriptionTask: Task<Void, Never>?
 
-    /// The model to use for transcription.
-    var selectedModel: WhisperModel = .base
+    /// The model to use for transcription. Persisted via UserDefaults.
+    @Published var selectedModel: WhisperModel = {
+        if let raw = UserDefaults.standard.string(forKey: whisperModelDefaultsKey),
+           let model = WhisperModel(rawValue: raw) {
+            return model
+        }
+        return .base
+    }() {
+        didSet { UserDefaults.standard.set(selectedModel.rawValue, forKey: Self.whisperModelDefaultsKey) }
+    }
 
     /// Prepare the streaming transcriber with a loaded engine.
     func prepareForLiveTranscription() async throws {
