@@ -2,7 +2,7 @@
 
 > Private meeting transcription for Mac. No bots. No cloud. No subscriptions.
 
-EchoNotes is a native macOS menu bar app that records audio from **any** call — Zoom, Google Meet, FaceTime, Discord, phone calls, whatever — and transcribes it locally using [WhisperKit](https://github.com/argmaxinc/WhisperKit). Optionally generate AI-powered meeting summaries with your existing ChatGPT subscription or any API key.
+EchoNotes is a native macOS desktop app that records audio from **any** call — Zoom, Google Meet, FaceTime, Discord, phone calls, whatever — and transcribes it locally using [WhisperKit](https://github.com/argmaxinc/WhisperKit). Optionally generate AI-powered meeting summaries with your existing ChatGPT subscription or any API key.
 
 **🎤 AUDIO-ONLY APP** — We capture system audio output (other people on calls) and microphone input (your voice). No video, screen recording, or visual data whatsoever.
 
@@ -43,20 +43,20 @@ AVAudioEngine (microphone)      ──→ Right channel ──┘
 - **macOS 14.0+** (Sonoma or later)
 - **Apple Silicon** (M1 or later recommended for fast transcription)
 
-## Setup
+## Build & Run
 
 ```bash
 git clone <repo>
 cd echonotes
 ```
 
-### Build as macOS App (recommended)
+### Build the app (recommended)
 
 ```bash
 ./scripts/build-app.sh
 ```
 
-This creates `EchoNotes.app` in the project root. Drag it to `/Applications` to install.
+This creates `EchoNotes.app` in the project root. Double-click to launch, or drag to `/Applications` to install.
 
 ### Run from Xcode
 
@@ -64,9 +64,9 @@ This creates `EchoNotes.app` in the project root. Drag it to `/Applications` to 
 open Package.swift
 ```
 
-Press **⌘R** to build and run. The app appears as a waveform icon in your menu bar.
+Press **⌘R** to build and run.
 
-### Run from command line
+### Run from command line (debug)
 
 ```bash
 swift build
@@ -85,17 +85,19 @@ macOS will ask for:
 
 ## Usage
 
-1. Click the waveform icon in your menu bar
-2. Choose transcription mode: **Live** or **After Recording**
+1. Launch EchoNotes — a window opens with a sidebar and detail area
+2. Choose transcription mode in the toolbar: **Live** or **After Recording**
 3. Start a call in any app
-4. Click **Start Recording** (or press **⌘⇧R**)
-5. Click **Stop Recording** when done
+4. Click **Record** in the toolbar (or press **⌘⇧R**)
+5. Click **Stop** when done
 6. Your M4A + transcript are saved to `~/Documents/EchoNotes/`
-7. Open the recording detail view to generate an AI summary
+7. Select a recording in the sidebar to view the transcript
+8. Click **Ask EchoNotes** to generate an AI summary
+9. Open **Settings** (⌘,) to configure AI provider, Whisper model, and transcription defaults
 
 ## AI Summarization
 
-EchoNotes can generate structured meeting summaries from your transcripts. Configure in **Settings**:
+EchoNotes can generate structured meeting summaries from your transcripts. Configure in **Settings** (⌘,) → **AI** tab:
 
 ### Option 1: ChatGPT Sign-In (no API key needed)
 Click **Sign in with ChatGPT** to use your existing Plus/Pro subscription. Uses OAuth 2.1 + PKCE to authenticate, then calls the ChatGPT backend Responses API directly.
@@ -115,8 +117,8 @@ EchoNotes/
 │   ├── AIProvider.swift             # Multi-provider config (OpenAI, Anthropic, Google, Ollama)
 │   └── AIService.swift              # Summarization logic + ChatGPT backend streaming
 ├── App/
-│   ├── EchoNotesApp.swift           # Entry point (menu bar only)
-│   ├── AppDelegate.swift            # Status item + popover
+│   ├── EchoNotesApp.swift           # Entry point (WindowGroup + Settings scene)
+│   ├── AppDelegate.swift            # Owns shared state (RecordingEngine, RecordingLibrary)
 │   └── RecordingEngine.swift        # Coordinates capture + writing + transcription
 ├── Audio/
 │   ├── SystemAudioCapture.swift     # ScreenCaptureKit (audio-only)
@@ -135,10 +137,13 @@ EchoNotes/
 │   ├── TranscriptionManager.swift   # Orchestrates transcription + AI config + OAuth state
 │   └── ModelManager.swift           # Model loading + caching
 ├── Views/
-│   ├── MenuBarView.swift            # Main popover UI
-│   ├── LibraryView.swift            # Recording library with search
-│   ├── RecordingDetailView.swift    # Transcript + AI summary view
+│   ├── MainWindowView.swift         # Root NavigationSplitView (sidebar + detail)
+│   ├── SidebarView.swift            # Sidebar meeting list with search
+│   ├── ActiveRecordingView.swift    # Recording session UI (timer, levels, live transcript)
+│   ├── RecordingDetailView.swift    # Transcript + AI summary with DisclosureGroups
+│   ├── DesktopSettingsView.swift    # Tabbed Settings window (General, AI, About)
 │   ├── SettingsView.swift           # AI provider config + OAuth sign-in
+│   ├── LibraryView.swift            # Recording library (date formatter shared)
 │   ├── RecordingControlsView.swift  # Start/stop button
 │   ├── SummaryView.swift            # Meeting summary display
 │   ├── TranscriptDisplayView.swift  # Completed transcript display
@@ -157,7 +162,7 @@ EchoNotes/
 
 ## Tech Stack
 
-- **Swift / SwiftUI** — native macOS, menu bar app (`LSUIElement`)
+- **Swift / SwiftUI** — native macOS desktop app with NavigationSplitView
 - **SwiftPM** — package management (no Xcode project file needed)
 - **ScreenCaptureKit** — system audio capture (audio-only mode)
 - **AVAudioEngine** — microphone capture
