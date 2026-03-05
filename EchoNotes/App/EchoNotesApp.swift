@@ -16,7 +16,7 @@ struct EchoNotesApp: App {
         .defaultSize(width: 960, height: 640)
 
         Settings {
-            DesktopSettingsView()
+            SettingsSidebarView()
                 .environmentObject(appDelegate.recorder)
                 .environmentObject(appDelegate.recorder.transcriptionManager)
                 .environmentObject(appDelegate.recorder.transcriptionManager.modelManager)

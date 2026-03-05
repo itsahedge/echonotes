@@ -60,8 +60,9 @@ final class AIService: Sendable {
             return try await summarizeAnthropic(transcript: transcript, config: config)
         case .google:
             return try await summarizeGoogle(transcript: transcript, config: config)
-        default:
-            // OpenAI-compatible (OpenAI, Ollama)
+        case .ollama:
+            return try await summarizeOllama(transcript: transcript, config: config)
+        case .openai:
             return try await summarizeOpenAICompatible(transcript: transcript, config: config)
         }
     }
@@ -196,7 +197,7 @@ final class AIService: Sendable {
         return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
     }
 
-    // MARK: - OpenAI-compatible (OpenAI, Ollama)
+    // MARK: - OpenAI-compatible (OpenAI)
 
     private func summarizeOpenAICompatible(transcript: String, config: Configuration) async throws -> MeetingSummary {
         let prompt = summaryPrompt(transcript: transcript)
@@ -211,11 +212,6 @@ final class AIService: Sendable {
             "max_tokens": 2000
         ]
 
-        // Only add response_format for non-Ollama (some local models don't support it)
-        if config.provider != .ollama {
-            requestBody["response_format"] = ["type": "json_object"]
-        }
-
         var request = URLRequest(url: config.endpoint)
         request.httpMethod = "POST"
         request.setValue(config.provider.authHeaderValue(apiKey: config.apiKey), forHTTPHeaderField: config.provider.authHeaderName)
@@ -223,6 +219,39 @@ final class AIService: Sendable {
         if let accountId = config.chatgptAccountId {
             request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
         }
+        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        request.timeoutInterval = 120
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw AIError.invalidResponse
+        }
+        guard httpResponse.statusCode == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            throw AIError.apiError(statusCode: httpResponse.statusCode, message: body)
+        }
+
+        return try parseResponse(data)
+    }
+
+    // MARK: - Ollama
+
+    private func summarizeOllama(transcript: String, config: Configuration) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript)
+
+        let requestBody: [String: Any] = [
+            "model": config.model,
+            "messages": [
+                ["role": "system", "content": "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."],
+                ["role": "user", "content": prompt]
+            ],
+            "stream": false
+        ]
+
+        var request = URLRequest(url: config.endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
         request.timeoutInterval = 120
 

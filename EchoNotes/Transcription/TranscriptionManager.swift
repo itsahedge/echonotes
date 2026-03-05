@@ -30,6 +30,8 @@ final class TranscriptionManager: ObservableObject {
     // MARK: - AI Provider Settings
 
     private static let apiKeyDefaultsKey = "openaiAPIKey"
+    private static let anthropicApiKeyDefaultsKey = "anthropicAPIKey"
+    private static let googleApiKeyDefaultsKey = "googleAPIKey"
     private static let providerDefaultsKey = "aiProvider"
     private static let aiModelDefaultsKey = "aiModel"
     private static let whisperModelDefaultsKey = "whisperModel"
@@ -37,6 +39,16 @@ final class TranscriptionManager: ObservableObject {
     /// API key for the selected AI provider.
     @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(openaiAPIKey, forKey: Self.apiKeyDefaultsKey) }
+    }
+
+    /// API key for Anthropic.
+    @Published var anthropicAPIKey: String = UserDefaults.standard.string(forKey: anthropicApiKeyDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(anthropicAPIKey, forKey: Self.anthropicApiKeyDefaultsKey) }
+    }
+
+    /// API key for Google Gemini.
+    @Published var googleAPIKey: String = UserDefaults.standard.string(forKey: googleApiKeyDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(googleAPIKey, forKey: Self.googleApiKeyDefaultsKey) }
     }
 
     /// Selected AI provider for summarization.
