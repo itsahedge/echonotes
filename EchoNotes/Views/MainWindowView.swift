@@ -86,6 +86,13 @@ struct MainWindowView: View {
         .pickerStyle(.segmented)
         .frame(width: 200)
 
+        // Settings
+        Button(action: {
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }) {
+            Image(systemName: "gearshape")
+        }
+
         // Record / Stop button
         Button(action: {
             Task {
