@@ -28,6 +28,18 @@ struct MainWindowView: View {
         .onAppear {
             library.scan()
         }
+        .onChange(of: recorder.isRecording) { _, isRecording in
+            if !isRecording {
+                // Re-scan after recording stops so new entry appears in sidebar
+                library.scan()
+            }
+        }
+        .onChange(of: tm.isTranscribing) { _, isTranscribing in
+            if !isTranscribing {
+                // Re-scan after transcription completes so transcript preview updates
+                library.scan()
+            }
+        }
     }
 
     // MARK: - Detail
