@@ -16,6 +16,14 @@ struct RecordingEntry: Identifiable, Hashable, Sendable {
 
     var filename: String { url.lastPathComponent }
 
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: RecordingEntry, rhs: RecordingEntry) -> Bool {
+        lhs.id == rhs.id
+    }
+
     /// Load a Transcript from the associated .json file, falling back to .txt if needed.
     func loadTranscript() -> Transcript? {
         // Try structured JSON first

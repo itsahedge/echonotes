@@ -40,11 +40,13 @@ struct MainWindowView: View {
             RecordingDetailView(entry: entry)
                 .id(entry.id)
         } else if let summary = tm.summary, let transcript = tm.transcript {
+            // Current-session flow: user just recorded → transcribed → summarized (no library entry selected)
             SummaryView(summary: summary, recordingURL: transcript.recordingURL, onBack: {
                 tm.summary = nil
             })
             .padding(20)
         } else if let transcript = tm.transcript {
+            // Current-session flow: user just recorded → transcribed (no library entry selected)
             TranscriptDisplayView(transcript: transcript, onNew: {
                 tm.reset()
                 recorder.lastRecordingURL = nil
