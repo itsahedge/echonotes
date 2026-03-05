@@ -3,7 +3,7 @@ import Foundation
 import os
 
 /// A single recording entry in the library.
-struct RecordingEntry: Identifiable, Sendable {
+struct RecordingEntry: Identifiable, Hashable, Sendable {
     let id: URL
     let url: URL
     let date: Date

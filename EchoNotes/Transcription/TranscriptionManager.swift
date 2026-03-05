@@ -116,7 +116,7 @@ final class TranscriptionManager: ObservableObject {
     private var transcriptionTask: Task<Void, Never>?
 
     /// The model to use for transcription.
-    var selectedModel: WhisperModel = .base
+    @Published var selectedModel: WhisperModel = .base
 
     /// Prepare the streaming transcriber with a loaded engine.
     func prepareForLiveTranscription() async throws {

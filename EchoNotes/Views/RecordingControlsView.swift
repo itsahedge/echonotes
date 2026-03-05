@@ -3,8 +3,7 @@ import SwiftUI
 /// Primary recording control button (start/stop).
 struct RecordingControlsView: View {
     @ObservedObject var recorder: RecordingEngine
-    weak var delegate: AppDelegate?
-    
+
     var body: some View {
         Group {
             if shouldShowPrimaryButton {
@@ -15,7 +14,6 @@ struct RecordingControlsView: View {
                         } else {
                             await recorder.startRecording()
                         }
-                        delegate?.updateStatusIcon(isRecording: recorder.isRecording)
                     }
                 }) {
                     HStack {
@@ -30,11 +28,11 @@ struct RecordingControlsView: View {
             }
         }
     }
-    
+
     private var shouldShowPrimaryButton: Bool {
-        recorder.isRecording || 
-        (recorder.lastRecordingURL == nil && 
-         !recorder.transcriptionManager.isTranscribing && 
+        recorder.isRecording ||
+        (recorder.lastRecordingURL == nil &&
+         !recorder.transcriptionManager.isTranscribing &&
          recorder.transcriptionManager.transcript == nil)
     }
 }

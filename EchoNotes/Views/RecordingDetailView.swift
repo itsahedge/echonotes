@@ -3,14 +3,12 @@ import SwiftUI
 /// Detail view for a single recording — shows full transcript with AI summary option.
 struct RecordingDetailView: View {
     let entry: RecordingEntry
-    @ObservedObject var tm: TranscriptionManager
-    let onBack: () -> Void
+    @EnvironmentObject var tm: TranscriptionManager
 
     @State private var transcript: Transcript?
     @State private var summary: MeetingSummary?
     @State private var isSummarizing = false
     @State private var summaryError: String?
-    @State private var showingSummary = false
 
     private var existingSummary: MeetingSummary? {
         let jsonURL = entry.url.deletingPathExtension().appendingPathExtension("summary.json")
@@ -23,16 +21,72 @@ struct RecordingDetailView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            header
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Header
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LibraryView.dateFormatter.string(from: entry.date))
+                        .font(.title2.bold())
+                    Text(Transcript.formatTimestamp(entry.duration))
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
 
-            Divider().padding(.bottom, 8)
+                // AI Summary section
+                if let summary {
+                    summarySection(summary)
+                } else if entry.hasTranscript {
+                    aiButtonSection
+                }
 
-            if showingSummary, let summary {
-                summaryContentView(summary)
-            } else {
-                mainContentView
+                // Full Transcript
+                if let transcript {
+                    transcriptSection(transcript)
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "text.badge.xmark")
+                            .font(.title2)
+                            .foregroundStyle(.tertiary)
+                        Text("No transcript available")
+                            .font(.body)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                }
+            }
+            .padding(20)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .toolbar {
+            ToolbarItemGroup(placement: .automatic) {
+                // Context menu actions
+                Menu {
+                    if let transcript {
+                        Button(action: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
+                        }) {
+                            Label("Copy Transcript", systemImage: "doc.on.doc")
+                        }
+                    }
+                    if let summary {
+                        Button(action: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(summary.toMarkdown(), forType: .string)
+                        }) {
+                            Label("Copy Summary", systemImage: "doc.on.doc")
+                        }
+                    }
+                    Divider()
+                    Button(action: {
+                        NSWorkspace.shared.selectFile(entry.url.path, inFileViewerRootedAtPath: entry.url.deletingLastPathComponent().path)
+                    }) {
+                        Label("Show in Finder", systemImage: "folder")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
             }
         }
         .onAppear {
@@ -43,255 +97,171 @@ struct RecordingDetailView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - AI Summary Button
 
-    private var header: some View {
-        HStack {
-            Button(action: {
-                if showingSummary {
-                    showingSummary = false
-                } else {
-                    onBack()
-                }
-            }) {
-                Image(systemName: "chevron.left")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(showingSummary ? "AI Summary" : LibraryView.dateFormatter.string(from: entry.date))
-                    .font(.caption.bold())
-                Text(Transcript.formatTimestamp(entry.duration))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            // Context menu
-            Menu {
-                Button(action: {
-                    NSWorkspace.shared.selectFile(entry.url.path, inFileViewerRootedAtPath: entry.url.deletingLastPathComponent().path)
-                }) {
-                    Label("Show in Finder", systemImage: "folder")
-                }
-                if let transcript {
-                    Button(action: {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
-                    }) {
-                        Label("Copy Transcript", systemImage: "doc.on.doc")
-                    }
-                }
-                if let summary {
-                    Button(action: {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(summary.toMarkdown(), forType: .string)
-                    }) {
-                        Label("Copy Summary", systemImage: "doc.on.doc")
-                    }
-                }
-            } label: {
-                Image(systemName: "ellipsis.circle")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .menuStyle(.borderlessButton)
-            .fixedSize()
+    @ViewBuilder
+    private var aiButtonSection: some View {
+        if let error = summaryError {
+            Text(error)
+                .font(.callout)
+                .foregroundStyle(.red)
         }
-        .padding(.bottom, 4)
-    }
 
-    // MARK: - Main Content (Transcript + AI button)
-
-    private var mainContentView: some View {
-        VStack(spacing: 8) {
-            // Transcript — this is the main content
-            if let transcript {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 4) {
-                        let hasSpeakers = transcript.segments.contains { $0.speaker != nil }
-
-                        if hasSpeakers {
-                            // Speaker legend
-                            HStack(spacing: 8) {
-                                ForEach([Speaker.user, .remote], id: \.rawValue) { speaker in
-                                    Label(speaker.rawValue, systemImage: speaker.icon)
-                                        .font(.caption2)
-                                        .foregroundStyle(speaker.color)
-                                }
-                            }
-                            .padding(.bottom, 4)
-
-                            // Diarized transcript
-                            ForEach(Array(transcript.segments.enumerated()), id: \.offset) { _, segment in
-                                let text = segment.cleanText
-                                if !text.isEmpty {
-                                    HStack(alignment: .top, spacing: 6) {
-                                        if let speaker = segment.speaker {
-                                            Text(speaker)
-                                                .font(.caption2.bold())
-                                                .foregroundStyle(Speaker(rawValue: speaker)?.color ?? .primary)
-                                                .frame(width: 32, alignment: .trailing)
-                                        }
-                                        Text(text)
-                                            .font(.caption)
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                    }
-                                }
-                            }
-                        } else {
-                            // Plain transcript
-                            Text(transcript.toPlainText())
-                                .font(.caption)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-            } else {
-                Spacer()
-                VStack(spacing: 6) {
-                    Image(systemName: "text.badge.xmark")
-                        .font(.title3)
-                        .foregroundStyle(.tertiary)
-                    Text("No transcript available")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-                Spacer()
-            }
-
-            // Bottom bar — AI summary button
-            if entry.hasTranscript {
-                Divider()
-
-                if let error = summaryError {
-                    Text(error)
-                        .font(.caption2)
-                        .foregroundStyle(.red)
-                }
-
-                HStack(spacing: 8) {
-                    if summary != nil || existingSummary != nil {
-                        // Has a summary — show view + regenerate
-                        Button(action: {
-                            if let s = summary ?? existingSummary {
-                                self.summary = s
-                                showingSummary = true
-                            }
-                        }) {
-                            Label("View Summary", systemImage: "sparkles")
-                                .font(.caption)
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button(action: { generateSummary() }) {
-                            if isSummarizing {
-                                ProgressView().controlSize(.mini)
-                            } else {
-                                Label("Regenerate", systemImage: "arrow.clockwise")
-                                    .font(.caption)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.secondary)
-                        .disabled(isSummarizing)
-                    } else if tm.isAIConfigured {
-                        // No summary, has API key
-                        Button(action: { generateSummary() }) {
-                            HStack {
-                                if isSummarizing {
-                                    ProgressView().controlSize(.mini)
-                                    Text("Generating…")
-                                } else {
-                                    Image(systemName: "sparkles")
-                                    Text("Generate Summary with AI")
-                                }
-                            }
-                            .font(.caption)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(isSummarizing)
+        if tm.isAIConfigured {
+            Button(action: { generateSummary() }) {
+                HStack {
+                    if isSummarizing {
+                        ProgressView().controlSize(.small)
+                        Text("Generating...")
                     } else {
-                        // No API key
-                        HStack(spacing: 4) {
-                            Image(systemName: "sparkles")
-                                .font(.caption2)
-                            Text("Add API key in Settings for AI summaries")
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(.tertiary)
+                        Image(systemName: "sparkles")
+                        Text("Ask EchoNotes")
                     }
-
-                    Spacer()
                 }
             }
+            .buttonStyle(.borderedProminent)
+            .disabled(isSummarizing)
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                Text("Add API key in Settings for AI summaries")
+            }
+            .font(.callout)
+            .foregroundStyle(.tertiary)
         }
     }
 
-    // MARK: - Summary Content
+    // MARK: - Summary Section
 
-    private func summaryContentView(_ summary: MeetingSummary) -> some View {
-        VStack(spacing: 8) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(summary.summary)
-                        .font(.caption)
-
-                    if !summary.actionItems.isEmpty {
-                        sectionView(title: "Action Items", icon: "checkmark.circle", items: summary.actionItems)
-                    }
-                    if !summary.keyDecisions.isEmpty {
-                        sectionView(title: "Key Decisions", icon: "star.fill", items: summary.keyDecisions)
-                    }
-                    if !summary.openQuestions.isEmpty {
-                        sectionView(title: "Open Questions", icon: "questionmark.circle", items: summary.openQuestions)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private func summarySection(_ summary: MeetingSummary) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            DisclosureGroup {
+                Text(summary.summary)
+                    .font(.body)
+                    .padding(.top, 4)
+            } label: {
+                Label("Summary", systemImage: "doc.text")
+                    .font(.headline)
+                    .foregroundStyle(.blue)
             }
 
-            Divider()
-
-            HStack(spacing: 8) {
-                Button(action: {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(summary.toMarkdown(), forType: .string)
-                }) {
-                    Label("Copy", systemImage: "doc.on.doc")
-                        .font(.caption)
+            if !summary.actionItems.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(summary.actionItems, id: \.self) { item in
+                            bulletItem(item)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label("Action Items", systemImage: "checkmark.circle")
+                        .font(.headline)
+                        .foregroundStyle(.green)
                 }
+            }
 
+            if !summary.keyDecisions.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(summary.keyDecisions, id: \.self) { item in
+                            bulletItem(item)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label("Key Decisions", systemImage: "star.fill")
+                        .font(.headline)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            if !summary.openQuestions.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(summary.openQuestions, id: \.self) { item in
+                            bulletItem(item)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Label("Open Questions", systemImage: "questionmark.circle")
+                        .font(.headline)
+                        .foregroundStyle(.purple)
+                }
+            }
+
+            // Regenerate button
+            HStack {
                 Button(action: { generateSummary() }) {
                     if isSummarizing {
-                        ProgressView().controlSize(.mini)
+                        ProgressView().controlSize(.small)
                     } else {
                         Label("Regenerate", systemImage: "arrow.clockwise")
-                            .font(.caption)
                     }
                 }
+                .buttonStyle(.bordered)
                 .disabled(isSummarizing)
-
-                Spacer()
             }
         }
     }
 
-    private func sectionView(title: String, icon: String, items: [String]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Label(title, systemImage: icon)
-                .font(.caption.bold())
+    private func bulletItem(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text("\u{2022}")
                 .foregroundStyle(.secondary)
-            ForEach(items, id: \.self) { item in
-                HStack(alignment: .top, spacing: 4) {
-                    Text("•")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(item)
-                        .font(.caption)
+            Text(text)
+                .font(.body)
+        }
+    }
+
+    // MARK: - Transcript Section
+
+    private func transcriptSection(_ transcript: Transcript) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let hasSpeakers = transcript.segments.contains { $0.speaker != nil }
+
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 6) {
+                    if hasSpeakers {
+                        // Speaker legend
+                        HStack(spacing: 12) {
+                            ForEach([Speaker.user, .remote], id: \.rawValue) { speaker in
+                                Label(speaker.rawValue, systemImage: speaker.icon)
+                                    .font(.callout)
+                                    .foregroundStyle(speaker.color)
+                            }
+                        }
+                        .padding(.bottom, 4)
+
+                        // Diarized transcript
+                        ForEach(Array(transcript.segments.enumerated()), id: \.offset) { _, segment in
+                            let text = segment.cleanText
+                            if !text.isEmpty {
+                                HStack(alignment: .top, spacing: 8) {
+                                    if let speaker = segment.speaker {
+                                        Text(speaker)
+                                            .font(.callout.bold())
+                                            .foregroundStyle(Speaker(rawValue: speaker)?.color ?? .primary)
+                                            .frame(width: 48, alignment: .trailing)
+                                    }
+                                    Text(text)
+                                        .font(.body)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                        }
+                    } else {
+                        Text(transcript.toPlainText())
+                            .font(.body)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
                 }
+                .padding(.top, 4)
+            } label: {
+                Label("Full Transcript", systemImage: "text.justify.leading")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
             }
         }
     }
@@ -318,7 +288,6 @@ struct RecordingDetailView: View {
                 try encoded.write(to: jsonSummaryURL, options: .atomic)
 
                 summary = result
-                showingSummary = true
             } catch {
                 summaryError = error.localizedDescription
             }
