@@ -51,6 +51,16 @@ struct MainWindowView: View {
             if !isTranscribing {
                 // Re-scan after transcription completes so transcript preview updates
                 library.scan()
+                // Auto-select the newly transcribed recording
+                if let url = tm.transcript?.recordingURL {
+                    selectedEntryID = url
+                }
+            }
+        }
+        .onChange(of: tm.isSummarizing) { _, isSummarizing in
+            if !isSummarizing {
+                // Re-scan after summary so the entry reflects updated state
+                library.scan()
             }
         }
     }
