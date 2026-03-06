@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// macOS Settings window with tabs for General, AI, Custom Providers, and About.
+/// Settings dashboard with sidebar navigation and content area.
 struct DesktopSettingsView: View {
     @EnvironmentObject var recorder: RecordingEngine
     @EnvironmentObject var tm: TranscriptionManager
@@ -8,23 +8,72 @@ struct DesktopSettingsView: View {
 
     @State private var connectionTestResult: ConnectionTestResult?
     @State private var isTesting = false
+    @State private var selectedSection: SettingsSection = .general
+
+    enum SettingsSection: String, CaseIterable, Identifiable {
+        case general = "General"
+        case aiProviders = "AI Providers"
+        case customProviders = "Custom Providers"
+        case knowledgeBase = "Knowledge Base"
+        case developer = "Developer"
+        case about = "About"
+
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .general: return "gearshape"
+            case .aiProviders: return "sparkles"
+            case .customProviders: return "plus.circle"
+            case .knowledgeBase: return "book.closed"
+            case .developer: return "chevron.left.forwardslash.chevron.right"
+            case .about: return "info.circle"
+            }
+        }
+    }
 
     var body: some View {
-        TabView {
-            generalTab
-                .tabItem { Label("General", systemImage: "gearshape") }
-            aiTab
-                .tabItem { Label("AI Providers", systemImage: "sparkles") }
-            customTab
-                .tabItem { Label("Custom Providers", systemImage: "plus.circle") }
-            knowledgeBaseTab
-                .tabItem { Label("Knowledge Base", systemImage: "book.closed") }
-            developerTab
-                .tabItem { Label("Developer", systemImage: "chevron.left.forwardslash.chevron.right") }
-            aboutTab
-                .tabItem { Label("About", systemImage: "info.circle") }
+        HStack(spacing: 0) {
+            // Settings sidebar
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Settings")
+                    .font(.headline)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
+
+                List(SettingsSection.allCases, selection: $selectedSection) { section in
+                    Label(section.rawValue, systemImage: section.icon)
+                        .tag(section)
+                }
+                .listStyle(.sidebar)
+            }
+            .frame(width: 180)
+
+            Divider()
+
+            // Content area
+            settingsContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var settingsContent: some View {
+        switch selectedSection {
+        case .general:
+            generalTab
+        case .aiProviders:
+            aiTab
+        case .customProviders:
+            customTab
+        case .knowledgeBase:
+            knowledgeBaseTab
+        case .developer:
+            developerTab
+        case .about:
+            aboutTab
+        }
     }
 
     // MARK: - General
@@ -322,6 +371,22 @@ struct DesktopSettingsView: View {
 
     // MARK: - About
 
+    private var aboutTab: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "waveform")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text("EchoNotes")
+                .font(.title2.bold())
+            Text("Local-first meeting recorder with on-device transcription via WhisperKit.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 300)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
     // MARK: - Test Connection
 
     private func testConnection() {
@@ -377,24 +442,6 @@ struct DesktopSettingsView: View {
             }
             isTesting = false
         }
-    }
-
-    // MARK: - About
-
-    private var aboutTab: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "waveform")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("EchoNotes")
-                .font(.title2.bold())
-            Text("Local-first meeting recorder with on-device transcription via WhisperKit.")
-                .font(.body)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
