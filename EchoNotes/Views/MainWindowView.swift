@@ -1,14 +1,41 @@
 import SwiftUI
 
-/// Root view with NavigationSplitView — sidebar of recordings + detail area.
+/// Unified app section for Craft-style sidebar navigation.
+enum AppSection: String, CaseIterable, Identifiable {
+    case meetings = "Meetings"
+    case general = "General"
+    case aiProviders = "AI Providers"
+    case customProviders = "Custom Providers"
+    case knowledgeBase = "Knowledge Base"
+    case developer = "Developer"
+    case about = "About"
+
+    var id: String { rawValue }
+
+    var icon: String {
+        switch self {
+        case .meetings: return "list.bullet"
+        case .general: return "gearshape"
+        case .aiProviders: return "sparkles"
+        case .customProviders: return "plus.circle"
+        case .knowledgeBase: return "book.closed"
+        case .developer: return "chevron.left.forwardslash.chevron.right"
+        case .about: return "info.circle"
+        }
+    }
+
+    var isSettings: Bool { self != .meetings }
+}
+
+/// Root view — Craft-style left sidebar with navigation sections + content area.
 struct MainWindowView: View {
     @EnvironmentObject var recorder: RecordingEngine
     @EnvironmentObject var tm: TranscriptionManager
     @EnvironmentObject var modelManager: ModelManager
     @EnvironmentObject var library: RecordingLibrary
 
+    @State private var selectedSection: AppSection = .meetings
     @State private var selectedEntryID: URL?
-    @State private var showingSettings = false
 
     private var selectedEntry: RecordingEntry? {
         guard let id = selectedEntryID else { return nil }
@@ -16,34 +43,22 @@ struct MainWindowView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(selectedEntryID: $selectedEntryID)
-        } detail: {
-            HStack(spacing: 0) {
-                detailContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if showingSettings {
-                    Divider()
-                    DesktopSettingsView(onClose: {
-                            withAnimation(.easeInOut(duration: 0.2)) { showingSettings = false }
-                        })
-                        .frame(width: 520)
-                        .transition(.move(edge: .trailing))
-                }
-            }
+        HStack(spacing: 0) {
+            appSidebar
+            Divider()
+            contentArea
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
                 toolbarContent
             }
         }
-        .onAppear {
-            library.scan()
-        }
+        .onAppear { library.scan() }
         .onChange(of: recorder.isRecording) { _, isRecording in
             if isRecording {
                 // Scan + select the new entry as soon as recording starts
+                selectedSection = .meetings
                 library.scan()
                 if let url = recorder.lastRecordingURL {
                     selectedEntryID = url
@@ -71,23 +86,173 @@ struct MainWindowView: View {
         }
     }
 
-    // MARK: - Detail
+    // MARK: - Sidebar
+
+    private var appSidebar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("EchoNotes")
+                .font(.headline)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    sidebarRow(.meetings)
+                        .padding(.bottom, 8)
+
+                    sectionHeader("Configuration")
+                    ForEach([AppSection.general, .aiProviders, .customProviders, .knowledgeBase], id: \.self) { section in
+                        sidebarRow(section)
+                    }
+
+                    sectionHeader("Other")
+                        .padding(.top, 12)
+                    ForEach([AppSection.developer, .about], id: \.self) { section in
+                        sidebarRow(section)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
+            }
+
+            Spacer()
+        }
+        .frame(width: 190)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.bold())
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
+    }
+
+    private func sidebarRow(_ section: AppSection) -> some View {
+        Button(action: { selectedSection = section }) {
+            HStack(spacing: 8) {
+                Image(systemName: section.icon)
+                    .font(.callout)
+                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                    .frame(width: 18)
+                Text(section.rawValue)
+                    .font(.callout)
+                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                selectedSection == section
+                    ? Color.secondary.opacity(0.15)
+                    : Color.clear
+            )
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Content
 
     @ViewBuilder
-    private var detailContent: some View {
+    private var contentArea: some View {
+        switch selectedSection {
+        case .meetings:
+            meetingsContent
+        default:
+            DesktopSettingsView(section: selectedSection)
+        }
+    }
+
+    // MARK: - Meetings Content
+
+    private var meetingsContent: some View {
+        HStack(spacing: 0) {
+            meetingListPanel
+                .frame(width: 280)
+            Divider()
+            meetingDetailPanel
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    private var meetingListPanel: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search meetings...", text: $library.searchQuery)
+                    .textFieldStyle(.plain)
+                if !library.searchQuery.isEmpty {
+                    Button(action: { library.searchQuery = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(8)
+
+            Divider()
+
+            if library.filteredEntries.isEmpty {
+                Spacer()
+                if library.entries.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "waveform.slash")
+                            .font(.system(size: 30))
+                            .foregroundStyle(.secondary)
+                        Text("No recordings yet")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("No results for \"\(library.searchQuery)\"")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            } else {
+                List(library.filteredEntries, selection: $selectedEntryID) { entry in
+                    MeetingRow(entry: entry)
+                        .tag(entry.id)
+                        .contextMenu {
+                            Button(action: {
+                                NSWorkspace.shared.selectFile(entry.url.path, inFileViewerRootedAtPath: entry.url.deletingLastPathComponent().path)
+                            }) {
+                                Label("Show in Finder", systemImage: "folder")
+                            }
+                            Divider()
+                            Button(role: .destructive) {
+                                library.delete(entry)
+                                if selectedEntryID == entry.id {
+                                    selectedEntryID = nil
+                                }
+                            } label: {
+                                Label("Move to Trash", systemImage: "trash")
+                            }
+                        }
+                }
+                .listStyle(.sidebar)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var meetingDetailPanel: some View {
         if recorder.isRecording || tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
             ActiveRecordingView()
         } else if let entry = selectedEntry {
             RecordingDetailView(entry: entry)
                 .id(entry.id)
         } else if let summary = tm.summary, let transcript = tm.transcript {
-            // Current-session flow: user just recorded → transcribed → summarized (no library entry selected)
             SummaryView(summary: summary, recordingURL: transcript.recordingURL, onBack: {
                 tm.summary = nil
             })
             .padding(20)
         } else if let transcript = tm.transcript {
-            // Current-session flow: user just recorded → transcribed (no library entry selected)
             TranscriptDisplayView(transcript: transcript, onNew: {
                 tm.reset()
                 recorder.lastRecordingURL = nil
@@ -106,7 +271,6 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var toolbarContent: some View {
-        // Recording status
         if recorder.isRecording {
             HStack(spacing: 6) {
                 Circle().fill(.red).frame(width: 8, height: 8)
@@ -118,7 +282,6 @@ struct MainWindowView: View {
                 .foregroundStyle(.secondary)
         }
 
-        // Transcription mode picker
         Picker("Mode", selection: $recorder.transcriptionModeRaw) {
             ForEach(TranscriptionMode.allCases, id: \.rawValue) { mode in
                 Text(mode.rawValue).tag(mode.rawValue)
@@ -127,13 +290,6 @@ struct MainWindowView: View {
         .pickerStyle(.segmented)
         .frame(width: 200)
 
-        // Settings
-        Button(action: { withAnimation(.easeInOut(duration: 0.2)) { showingSettings.toggle() } }) {
-            Image(systemName: "gearshape")
-        }
-        .help(showingSettings ? "Close Settings" : "Settings")
-
-        // Record / Stop button
         Button(action: {
             Task {
                 if recorder.isRecording {
@@ -214,5 +370,36 @@ struct MainWindowView: View {
             .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// A single row in the meeting list.
+private struct MeetingRow: View {
+    let entry: RecordingEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(LibraryView.dateFormatter.string(from: entry.date))
+                    .font(.body.bold())
+                    .lineLimit(1)
+                Spacer()
+                Text(Transcript.formatTimestamp(entry.duration))
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+
+            if let preview = entry.transcriptPreview {
+                Text(preview)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            } else {
+                Text(entry.hasTranscript ? "Transcript available" : "Not transcribed")
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
