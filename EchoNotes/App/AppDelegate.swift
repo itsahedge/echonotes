@@ -8,6 +8,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let library = RecordingLibrary()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let debugLog = DebugLogger.shared
+        let tm = recorder.transcriptionManager
+        debugLog.info("EchoNotes launched", category: "App")
+        debugLog.info("Whisper model: \(tm.selectedModel.rawValue)", category: "App")
+        debugLog.info("AI provider: \(tm.selectedProvider.rawValue) (\(tm.selectedAIModel))", category: "App")
+        if tm.useKnowledgeBase && !tm.knowledgeBasePath.isEmpty {
+            debugLog.info("Knowledge base: \(tm.knowledgeBasePath)", category: "App")
+        }
+
         // Pre-download Whisper model on first launch if not already cached
         Task {
             if !ModelManager.modelLikelyCached() {
