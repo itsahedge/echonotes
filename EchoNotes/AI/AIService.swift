@@ -191,7 +191,7 @@ final class AIService: Sendable {
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.3,
-            "max_tokens": isLocal ? 4096 : 2000
+            "max_tokens": isLocal ? 8192 : 2000
         ]
 
         var request = URLRequest(url: config.endpoint)
