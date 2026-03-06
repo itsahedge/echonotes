@@ -140,17 +140,7 @@ final class AIService: Sendable {
             throw AIError.invalidResponse
         }
 
-        // Parse the collected text as JSON
-        var cleaned = fullText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
-        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
-        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let summaryData = cleaned.data(using: .utf8) else {
-            throw AIError.invalidResponse
-        }
-        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+        return try extractSummary(from: fullText)
     }
 
     /// Parse the OpenAI Responses API format.
@@ -181,20 +171,11 @@ final class AIService: Sendable {
             }
         }
 
-        guard var cleaned = text?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+        guard let text else {
             throw AIError.invalidResponse
         }
 
-        // Strip markdown code fences if present
-        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
-        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
-        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let summaryData = cleaned.data(using: .utf8) else {
-            throw AIError.invalidResponse
-        }
-        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+        return try extractSummary(from: text)
     }
 
     // MARK: - OpenAI-compatible (OpenAI)
@@ -373,18 +354,64 @@ final class AIService: Sendable {
             throw AIError.invalidResponse
         }
 
-        // Strip markdown code fences if present
-        var cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try extractSummary(from: content)
+    }
+
+    /// Extract MeetingSummary from raw AI text output.
+    /// Handles: <think> blocks, markdown fences, extra text around JSON, snake_case keys.
+    private func extractSummary(from text: String) throws -> MeetingSummary {
+        var cleaned = text
+
+        // Strip <think>...</think> blocks (Qwen, DeepSeek reasoning models)
+        while let thinkStart = cleaned.range(of: "<think>"),
+              let thinkEnd = cleaned.range(of: "</think>") {
+            cleaned.removeSubrange(thinkStart.lowerBound..<thinkEnd.upperBound)
+        }
+
+        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip markdown code fences
         if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
         if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
         if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
         cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        // Try to find JSON object if there's extra text around it
+        if !cleaned.hasPrefix("{"), let braceStart = cleaned.firstIndex(of: "{") {
+            cleaned = String(cleaned[braceStart...])
+        }
+        if let braceEnd = cleaned.lastIndex(of: "}") {
+            cleaned = String(cleaned[...braceEnd])
+        }
+
         guard let summaryData = cleaned.data(using: .utf8) else {
             throw AIError.invalidResponse
         }
 
-        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+        // Try camelCase first, then snake_case
+        let decoder = JSONDecoder()
+        if let result = try? decoder.decode(MeetingSummary.self, from: summaryData) {
+            return result
+        }
+
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        if let result = try? decoder.decode(MeetingSummary.self, from: summaryData) {
+            return result
+        }
+
+        // Manual fallback: parse JSON dict and extract fields flexibly
+        if let dict = try? JSONSerialization.jsonObject(with: summaryData) as? [String: Any] {
+            let summary = (dict["summary"] as? String) ?? ""
+            let actionItems = (dict["actionItems"] ?? dict["action_items"]) as? [String] ?? []
+            let keyDecisions = (dict["keyDecisions"] ?? dict["key_decisions"]) as? [String] ?? []
+            let openQuestions = (dict["openQuestions"] ?? dict["open_questions"]) as? [String] ?? []
+
+            if !summary.isEmpty {
+                return MeetingSummary(summary: summary, actionItems: actionItems, keyDecisions: keyDecisions, openQuestions: openQuestions)
+            }
+        }
+
+        throw AIError.parseError(content: String(cleaned.prefix(200)))
     }
 
     /// Parse Anthropic messages API response.
@@ -396,16 +423,7 @@ final class AIService: Sendable {
             throw AIError.invalidResponse
         }
 
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
-        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
-        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let summaryData = cleaned.data(using: .utf8) else {
-            throw AIError.invalidResponse
-        }
-        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+        return try extractSummary(from: text)
     }
 
     /// Parse Google Gemini generateContent response.
@@ -420,16 +438,7 @@ final class AIService: Sendable {
             throw AIError.invalidResponse
         }
 
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```json") { cleaned = String(cleaned.dropFirst(7)) }
-        if cleaned.hasPrefix("```") { cleaned = String(cleaned.dropFirst(3)) }
-        if cleaned.hasSuffix("```") { cleaned = String(cleaned.dropLast(3)) }
-        cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let summaryData = cleaned.data(using: .utf8) else {
-            throw AIError.invalidResponse
-        }
-        return try JSONDecoder().decode(MeetingSummary.self, from: summaryData)
+        return try extractSummary(from: text)
     }
 }
 
@@ -437,12 +446,14 @@ enum AIError: LocalizedError {
     case noAPIKey
     case invalidResponse
     case apiError(statusCode: Int, message: String)
+    case parseError(content: String)
 
     var errorDescription: String? {
         switch self {
         case .noAPIKey: return "No API key configured. Add one in Settings."
         case .invalidResponse: return "Invalid response from AI service."
         case .apiError(let code, let msg): return "API error (\(code)): \(msg)"
+        case .parseError(let content): return "Could not parse AI response as JSON. Response started with: \(content)"
         }
     }
 }
