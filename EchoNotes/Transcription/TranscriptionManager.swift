@@ -312,6 +312,11 @@ final class TranscriptionManager: ObservableObject {
             let mdURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("md")
             try result.toMarkdown().write(to: mdURL, atomically: true, encoding: .utf8)
 
+            // Save as .summary.json so RecordingDetailView can load it
+            let jsonURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("summary.json")
+            let encoded = try JSONEncoder().encode(result)
+            try encoded.write(to: jsonURL, options: .atomic)
+
             debugLog.info("Summary generated successfully", category: "AI")
             self.summary = result
         } catch {

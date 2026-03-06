@@ -21,7 +21,9 @@ struct RecordingEntry: Identifiable, Hashable, Sendable {
     }
 
     static func == (lhs: RecordingEntry, rhs: RecordingEntry) -> Bool {
-        lhs.id == rhs.id
+        lhs.id == rhs.id &&
+        lhs.hasTranscript == rhs.hasTranscript &&
+        lhs.transcriptPreview == rhs.transcriptPreview
     }
 
     /// Load a Transcript from the associated .json file, falling back to .txt if needed.
