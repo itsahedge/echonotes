@@ -9,9 +9,6 @@ struct DesktopSettingsView: View {
 
     let section: AppSection
 
-    @State private var connectionTestResult: ConnectionTestResult?
-    @State private var isTesting = false
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
@@ -37,8 +34,6 @@ struct DesktopSettingsView: View {
             generalContent
         case .aiProviders:
             aiContent
-        case .customProviders:
-            customContent
         case .knowledgeBase:
             knowledgeBaseContent
         case .developer:
@@ -95,79 +90,6 @@ struct DesktopSettingsView: View {
         ScrollView {
             SettingsView(tm: tm)
                 .padding(20)
-        }
-    }
-
-    // MARK: - Custom Providers
-
-    private var customContent: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                Text("Connect to any OpenAI-compatible API endpoint (llama.cpp, vLLM, LM Studio, etc).")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-
-                settingsGroup("Endpoint") {
-                    TextField("URL", text: $tm.customEndpoint, prompt: Text("http://localhost:8080/v1/chat/completions"))
-                        .textFieldStyle(.roundedBorder)
-                }
-
-                settingsGroup("Model") {
-                    TextField("Model name", text: $tm.customModel, prompt: Text("e.g. qwen3.5-35b-a3b"))
-                        .textFieldStyle(.roundedBorder)
-                    Text("The model name sent in the request body.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                settingsGroup("API Key") {
-                    SecureField("API key", text: $tm.customAPIKey, prompt: Text("Leave empty if not required"))
-                        .textFieldStyle(.roundedBorder)
-                    Text("Only needed if your server requires authentication.")
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
-                }
-
-                HStack(spacing: 10) {
-                    Button(action: { testConnection() }) {
-                        HStack(spacing: 4) {
-                            if isTesting {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Image(systemName: "network")
-                            }
-                            Text(isTesting ? "Testing..." : "Test Connection")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(tm.customEndpoint.isEmpty || isTesting)
-                }
-
-                if tm.selectedProvider == .custom {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Selected as active provider in AI Providers")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("To use this provider, select \"Custom (OpenAI-compatible)\" in AI Providers.")
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
-                }
-
-                if let result = connectionTestResult {
-                    HStack(spacing: 6) {
-                        Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                            .foregroundStyle(result.success ? .green : .red)
-                        Text(result.message)
-                            .font(.callout)
-                            .foregroundColor(result.success ? .primary : .red)
-                    }
-                }
-            }
-            .padding(20)
         }
     }
 
@@ -382,64 +304,4 @@ struct DesktopSettingsView: View {
         }
     }
 
-    // MARK: - Test Connection
-
-    private func testConnection() {
-        guard let url = URL(string: tm.customEndpoint) else {
-            connectionTestResult = ConnectionTestResult(success: false, message: "Invalid URL")
-            return
-        }
-
-        isTesting = true
-        connectionTestResult = nil
-
-        Task {
-            do {
-                let model = tm.customModel.isEmpty ? "default" : tm.customModel
-                let body: [String: Any] = [
-                    "model": model,
-                    "messages": [["role": "user", "content": "Say hi"]],
-                    "max_tokens": 5
-                ]
-
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                if !tm.customAPIKey.isEmpty {
-                    request.setValue("Bearer \(tm.customAPIKey)", forHTTPHeaderField: "Authorization")
-                }
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                request.timeoutInterval = 10
-
-                let (data, response) = try await URLSession.shared.data(for: request)
-
-                guard let http = response as? HTTPURLResponse else {
-                    connectionTestResult = ConnectionTestResult(success: false, message: "No response")
-                    isTesting = false
-                    return
-                }
-
-                if http.statusCode == 200 {
-                    var detail = "Connected (HTTP 200)"
-                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let responseModel = json["model"] as? String {
-                        detail = "Connected — model: \(responseModel)"
-                    }
-                    connectionTestResult = ConnectionTestResult(success: true, message: detail)
-                } else {
-                    let body = String(data: data, encoding: .utf8) ?? ""
-                    let short = body.prefix(100)
-                    connectionTestResult = ConnectionTestResult(success: false, message: "HTTP \(http.statusCode): \(short)")
-                }
-            } catch {
-                connectionTestResult = ConnectionTestResult(success: false, message: error.localizedDescription)
-            }
-            isTesting = false
-        }
-    }
-}
-
-private struct ConnectionTestResult {
-    let success: Bool
-    let message: String
 }

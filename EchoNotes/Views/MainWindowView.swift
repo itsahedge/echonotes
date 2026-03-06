@@ -5,7 +5,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case meetings = "Meetings"
     case general = "General"
     case aiProviders = "AI Providers"
-    case customProviders = "Custom Providers"
+
     case knowledgeBase = "Knowledge Base"
     case developer = "Developer"
     case about = "About"
@@ -17,7 +17,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .meetings: return "list.bullet"
         case .general: return "gearshape"
         case .aiProviders: return "sparkles"
-        case .customProviders: return "plus.circle"
+
         case .knowledgeBase: return "book.closed"
         case .developer: return "chevron.left.forwardslash.chevron.right"
         case .about: return "info.circle"
@@ -103,7 +103,7 @@ struct MainWindowView: View {
                         .padding(.bottom, 8)
 
                     sectionHeader("Configuration")
-                    ForEach([AppSection.general, .aiProviders, .customProviders, .knowledgeBase], id: \.self) { section in
+                    ForEach([AppSection.general, .aiProviders, .knowledgeBase], id: \.self) { section in
                         sidebarRow(section)
                     }
 
