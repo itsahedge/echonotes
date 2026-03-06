@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var apiKeyInput: String = ""
     @State private var showKey = false
     @State private var saved = false
+    @State private var connectionTestResult: ConnectionTestResult?
+    @State private var isTesting = false
 
     var body: some View {
         VStack(spacing: 12) {
@@ -139,27 +141,13 @@ struct SettingsView: View {
                 }
             }
 
-            // Model picker
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Model")
-                    .font(.callout.bold())
-                    .foregroundStyle(.secondary)
+            // Model picker (not shown for custom — it's in the endpoint config below)
+            if tm.selectedProvider != .custom {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Model")
+                        .font(.callout.bold())
+                        .foregroundStyle(.secondary)
 
-                if tm.selectedProvider == .custom {
-                    // Show custom model from Custom Providers config
-                    if tm.customModel.isEmpty {
-                        Text("Not configured — set up in Custom Providers")
-                            .font(.callout)
-                            .foregroundStyle(.tertiary)
-                    } else {
-                        Text(tm.customModel)
-                            .font(.callout)
-                            .padding(.vertical, 4)
-                            .padding(.horizontal, 8)
-                            .background(Color.secondary.opacity(0.1))
-                            .cornerRadius(4)
-                    }
-                } else {
                     Picker("", selection: $tm.selectedAIModel) {
                         ForEach(tm.selectedProvider.modelOptions, id: \.self) { model in
                             Text(model).tag(model)
@@ -227,23 +215,7 @@ struct SettingsView: View {
                     }
                 }
             } else if tm.selectedProvider == .custom {
-                if !tm.customEndpoint.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                        Text("Using custom endpoint — configure in Custom Providers")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
-                        Text("Set up your endpoint in Custom Providers first")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                customEndpointSection
             } else if !tm.selectedProvider.requiresAPIKey {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.circle.fill")
@@ -258,4 +230,130 @@ struct SettingsView: View {
         .background(Color.secondary.opacity(0.05))
         .cornerRadius(8)
     }
+
+    // MARK: - Custom Endpoint
+
+    private var customEndpointSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Connect to any OpenAI-compatible API (llama.cpp, vLLM, LM Studio, etc).")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Endpoint")
+                    .font(.callout.bold())
+                    .foregroundStyle(.secondary)
+                TextField("URL", text: $tm.customEndpoint, prompt: Text("http://localhost:8080/v1/chat/completions"))
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Model")
+                    .font(.callout.bold())
+                    .foregroundStyle(.secondary)
+                TextField("Model name", text: $tm.customModel, prompt: Text("e.g. qwen3.5-35b-a3b"))
+                    .textFieldStyle(.roundedBorder)
+                Text("The model name sent in the request body.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("API Key")
+                    .font(.callout.bold())
+                    .foregroundStyle(.secondary)
+                SecureField("API key", text: $tm.customAPIKey, prompt: Text("Leave empty if not required"))
+                    .textFieldStyle(.roundedBorder)
+                Text("Only needed if your server requires authentication.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+
+            HStack(spacing: 10) {
+                Button(action: { testCustomConnection() }) {
+                    HStack(spacing: 4) {
+                        if isTesting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: "network")
+                        }
+                        Text(isTesting ? "Testing..." : "Test Connection")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(tm.customEndpoint.isEmpty || isTesting)
+            }
+
+            if let result = connectionTestResult {
+                HStack(spacing: 6) {
+                    Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(result.success ? .green : .red)
+                    Text(result.message)
+                        .font(.callout)
+                        .foregroundColor(result.success ? .primary : .red)
+                }
+            }
+        }
+    }
+
+    // MARK: - Test Connection
+
+    private func testCustomConnection() {
+        guard let url = URL(string: tm.customEndpoint) else {
+            connectionTestResult = ConnectionTestResult(success: false, message: "Invalid URL")
+            return
+        }
+
+        isTesting = true
+        connectionTestResult = nil
+
+        Task {
+            do {
+                let model = tm.customModel.isEmpty ? "default" : tm.customModel
+                let body: [String: Any] = [
+                    "model": model,
+                    "messages": [["role": "user", "content": "Say hi"]],
+                    "max_tokens": 5
+                ]
+
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                if !tm.customAPIKey.isEmpty {
+                    request.setValue("Bearer \(tm.customAPIKey)", forHTTPHeaderField: "Authorization")
+                }
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                request.timeoutInterval = 10
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let http = response as? HTTPURLResponse else {
+                    connectionTestResult = ConnectionTestResult(success: false, message: "No response")
+                    isTesting = false
+                    return
+                }
+
+                if http.statusCode == 200 {
+                    var detail = "Connected (HTTP 200)"
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let responseModel = json["model"] as? String {
+                        detail = "Connected — model: \(responseModel)"
+                    }
+                    connectionTestResult = ConnectionTestResult(success: true, message: detail)
+                } else {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    let short = body.prefix(100)
+                    connectionTestResult = ConnectionTestResult(success: false, message: "HTTP \(http.statusCode): \(short)")
+                }
+            } catch {
+                connectionTestResult = ConnectionTestResult(success: false, message: error.localizedDescription)
+            }
+            isTesting = false
+        }
+    }
+}
+
+private struct ConnectionTestResult {
+    let success: Bool
+    let message: String
 }
