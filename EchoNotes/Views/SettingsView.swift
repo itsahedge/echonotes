@@ -145,12 +145,28 @@ struct SettingsView: View {
                     .font(.callout.bold())
                     .foregroundStyle(.secondary)
 
-                Picker("", selection: $tm.selectedAIModel) {
-                    ForEach(tm.selectedProvider.modelOptions, id: \.self) { model in
-                        Text(model).tag(model)
+                if tm.selectedProvider == .custom {
+                    // Show custom model from Custom Providers config
+                    if tm.customModel.isEmpty {
+                        Text("Not configured — set up in Custom Providers")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                    } else {
+                        Text(tm.customModel)
+                            .font(.callout)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 8)
+                            .background(Color.secondary.opacity(0.1))
+                            .cornerRadius(4)
                     }
+                } else {
+                    Picker("", selection: $tm.selectedAIModel) {
+                        ForEach(tm.selectedProvider.modelOptions, id: \.self) { model in
+                            Text(model).tag(model)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
-                .pickerStyle(.menu)
             }
 
             // API Key (if required and not using OAuth)
@@ -208,6 +224,24 @@ struct SettingsView: View {
                                 .font(.callout)
                                 .foregroundStyle(.green)
                         }
+                    }
+                }
+            } else if tm.selectedProvider == .custom {
+                if !tm.customEndpoint.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Text("Using custom endpoint — configure in Custom Providers")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                        Text("Set up your endpoint in Custom Providers first")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
                 }
             } else if !tm.selectedProvider.requiresAPIKey {
