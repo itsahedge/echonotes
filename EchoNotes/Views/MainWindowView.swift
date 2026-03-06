@@ -99,9 +99,7 @@ struct MainWindowView: View {
         .frame(width: 200)
 
         // Settings
-        Button(action: {
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-        }) {
+        SettingsLink {
             Image(systemName: "gearshape")
         }
 
