@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// Settings dashboard with sidebar navigation and content area.
+/// Craft-inspired settings panel with sidebar navigation and content area.
 struct DesktopSettingsView: View {
     @EnvironmentObject var recorder: RecordingEngine
     @EnvironmentObject var tm: TranscriptionManager
     @EnvironmentObject var modelManager: ModelManager
+
+    var onClose: (() -> Void)?
 
     @State private var connectionTestResult: ConnectionTestResult?
     @State private var isTesting = false
@@ -30,29 +32,112 @@ struct DesktopSettingsView: View {
             case .about: return "info.circle"
             }
         }
+
+        var group: String {
+            switch self {
+            case .general, .aiProviders, .customProviders, .knowledgeBase:
+                return "Configuration"
+            case .developer, .about:
+                return "Other"
+            }
+        }
     }
 
     var body: some View {
         HStack(spacing: 0) {
-            // Settings sidebar
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Settings")
-                    .font(.headline)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
+            settingsSidebar
+            Divider()
+            settingsContentArea
+        }
+    }
 
-                List(SettingsSection.allCases, selection: $selectedSection) { section in
-                    Label(section.rawValue, systemImage: section.icon)
-                        .tag(section)
+    // MARK: - Sidebar
+
+    private var settingsSidebar: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 2) {
+                // Configuration group
+                sectionHeader("Configuration")
+
+                ForEach([SettingsSection.general, .aiProviders, .customProviders, .knowledgeBase]) { section in
+                    sidebarRow(section)
                 }
-                .listStyle(.sidebar)
+
+                // Other group
+                sectionHeader("Other")
+                    .padding(.top, 12)
+
+                ForEach([SettingsSection.developer, .about]) { section in
+                    sidebarRow(section)
+                }
             }
-            .frame(width: 180)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 16)
+        }
+        .frame(width: 170)
+    }
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.bold())
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
+    }
+
+    private func sidebarRow(_ section: SettingsSection) -> some View {
+        Button(action: { selectedSection = section }) {
+            HStack(spacing: 8) {
+                Image(systemName: section.icon)
+                    .font(.callout)
+                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                    .frame(width: 18)
+                Text(section.rawValue)
+                    .font(.callout)
+                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
+                Spacer()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                selectedSection == section
+                    ? Color.secondary.opacity(0.15)
+                    : Color.clear
+            )
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Content Area
+
+    private var settingsContentArea: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header with close button
+            HStack(spacing: 12) {
+                if let onClose {
+                    Button(action: onClose) {
+                        Image(systemName: "xmark")
+                            .font(.callout.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 28)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(6)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Text(selectedSection.rawValue)
+                    .font(.title3.bold())
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 16)
+            .padding(.bottom, 8)
 
             Divider()
+                .padding(.horizontal, 20)
 
-            // Content area
+            // Content
             settingsContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -62,89 +147,99 @@ struct DesktopSettingsView: View {
     private var settingsContent: some View {
         switch selectedSection {
         case .general:
-            generalTab
+            generalContent
         case .aiProviders:
-            aiTab
+            aiContent
         case .customProviders:
-            customTab
+            customContent
         case .knowledgeBase:
-            knowledgeBaseTab
+            knowledgeBaseContent
         case .developer:
-            developerTab
+            developerContent
         case .about:
-            aboutTab
+            aboutContent
         }
     }
 
     // MARK: - General
 
-    private var generalTab: some View {
-        Form {
-            Section("Transcription") {
-                Picker("Mode", selection: $recorder.transcriptionModeRaw) {
-                    ForEach(TranscriptionMode.allCases, id: \.rawValue) { mode in
-                        Text(mode.rawValue).tag(mode.rawValue)
+    private var generalContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                settingsGroup("Transcription") {
+                    settingsRow("Mode") {
+                        Picker("", selection: $recorder.transcriptionModeRaw) {
+                            ForEach(TranscriptionMode.allCases, id: \.rawValue) { mode in
+                                Text(mode.rawValue).tag(mode.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 200)
+                    }
+
+                    if recorder.transcriptionMode == .postRecording {
+                        settingsRow("Auto-transcribe") {
+                            Toggle("", isOn: $recorder.autoTranscribe)
+                                .labelsHidden()
+                        }
                     }
                 }
-                .pickerStyle(.segmented)
 
-                if recorder.transcriptionMode == .postRecording {
-                    Toggle("Auto-transcribe after recording", isOn: $recorder.autoTranscribe)
-                }
-            }
-
-            Section("Whisper Model") {
-                Picker("Model", selection: $tm.selectedModel) {
-                    ForEach(WhisperModel.allCases, id: \.self) { model in
-                        Text(model.rawValue).tag(model)
+                settingsGroup("Whisper Model") {
+                    settingsRow("Model") {
+                        Picker("", selection: $tm.selectedModel) {
+                            ForEach(WhisperModel.allCases, id: \.self) { model in
+                                Text(model.rawValue).tag(model)
+                            }
+                        }
+                        .frame(maxWidth: 200)
                     }
                 }
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
-        .padding()
     }
 
     // MARK: - AI Providers
 
-    private var aiTab: some View {
-        SettingsView(tm: tm)
-            .padding()
+    private var aiContent: some View {
+        ScrollView {
+            SettingsView(tm: tm)
+                .padding(20)
+        }
     }
 
     // MARK: - Custom Providers
 
-    private var customTab: some View {
-        Form {
-            Section {
-                Text("Connect to any OpenAI-compatible API endpoint (llama.cpp, vLLM, LM Studio, text-generation-webui, etc).")
+    private var customContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Connect to any OpenAI-compatible API endpoint (llama.cpp, vLLM, LM Studio, etc).")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            }
 
-            Section("Endpoint") {
-                TextField("URL", text: $tm.customEndpoint, prompt: Text("http://localhost:8080/v1/chat/completions"))
-                    .textFieldStyle(.roundedBorder)
-            }
+                settingsGroup("Endpoint") {
+                    TextField("URL", text: $tm.customEndpoint, prompt: Text("http://localhost:8080/v1/chat/completions"))
+                        .textFieldStyle(.roundedBorder)
+                }
 
-            Section("Model") {
-                TextField("Model name", text: $tm.customModel, prompt: Text("e.g. qwen3.5-35b-a3b"))
-                    .textFieldStyle(.roundedBorder)
-                Text("The model name sent in the request body. Check your server's /v1/models endpoint for available models.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                settingsGroup("Model") {
+                    TextField("Model name", text: $tm.customModel, prompt: Text("e.g. qwen3.5-35b-a3b"))
+                        .textFieldStyle(.roundedBorder)
+                    Text("The model name sent in the request body.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
 
-            Section("API Key (optional)") {
-                SecureField("API key", text: $tm.customAPIKey, prompt: Text("Leave empty if not required"))
-                    .textFieldStyle(.roundedBorder)
-                Text("Only needed if your server requires authentication.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+                settingsGroup("API Key") {
+                    SecureField("API key", text: $tm.customAPIKey, prompt: Text("Leave empty if not required"))
+                        .textFieldStyle(.roundedBorder)
+                    Text("Only needed if your server requires authentication.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
 
-            Section {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     Button(action: { testConnection() }) {
                         HStack(spacing: 4) {
                             if isTesting {
@@ -184,63 +279,64 @@ struct DesktopSettingsView: View {
                     }
                 }
             }
+            .padding(20)
         }
-        .formStyle(.grouped)
-        .padding()
     }
 
     // MARK: - Knowledge Base
 
     @State private var knowledgeBaseFileCount: Int?
 
-    private var knowledgeBaseTab: some View {
-        Form {
-            Section {
-                Text("Point to a folder of markdown files (e.g., an Obsidian vault) to give AI summaries contextual knowledge about your project, team, and prior decisions.")
+    private var knowledgeBaseContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Point to a folder of markdown files (e.g., an Obsidian vault) to give AI summaries contextual knowledge about your project.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            }
 
-            Section("Folder Path") {
-                HStack {
-                    TextField("Path", text: $tm.knowledgeBasePath, prompt: Text("~/Documents/my-vault"))
-                        .textFieldStyle(.roundedBorder)
-                    Button("Browse...") {
-                        let panel = NSOpenPanel()
-                        panel.canChooseFiles = false
-                        panel.canChooseDirectories = true
-                        panel.allowsMultipleSelection = false
-                        if panel.runModal() == .OK, let url = panel.url {
-                            tm.knowledgeBasePath = url.path
-                            scanKnowledgeBase()
+                settingsGroup("Folder Path") {
+                    HStack {
+                        TextField("Path", text: $tm.knowledgeBasePath, prompt: Text("~/Documents/my-vault"))
+                            .textFieldStyle(.roundedBorder)
+                        Button("Browse...") {
+                            let panel = NSOpenPanel()
+                            panel.canChooseFiles = false
+                            panel.canChooseDirectories = true
+                            panel.allowsMultipleSelection = false
+                            if panel.runModal() == .OK, let url = panel.url {
+                                tm.knowledgeBasePath = url.path
+                                scanKnowledgeBase()
+                            }
                         }
+                    }
+
+                    if let count = knowledgeBaseFileCount {
+                        Label("\(count) markdown files found", systemImage: "doc.text")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !tm.knowledgeBasePath.isEmpty {
+                        Label("Folder not found", systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
                     }
                 }
 
-                if let count = knowledgeBaseFileCount {
-                    Label("\(count) markdown files found", systemImage: "doc.text")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                } else if !tm.knowledgeBasePath.isEmpty {
-                    Label("Folder not found", systemImage: "exclamationmark.triangle")
-                        .font(.callout)
-                        .foregroundStyle(.orange)
+                settingsGroup("Context Injection") {
+                    settingsRow("Include in AI summaries") {
+                        Toggle("", isOn: $tm.useKnowledgeBase)
+                            .labelsHidden()
+                            .disabled(tm.knowledgeBasePath.isEmpty)
+                    }
+
+                    if tm.useKnowledgeBase && !tm.knowledgeBasePath.isEmpty {
+                        Text("Relevant vault files will be auto-discovered and included as context when generating summaries.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
-
-            Section {
-                Toggle("Include knowledge base context in AI summaries", isOn: $tm.useKnowledgeBase)
-                    .disabled(tm.knowledgeBasePath.isEmpty)
-
-                if tm.useKnowledgeBase && !tm.knowledgeBasePath.isEmpty {
-                    Text("When generating a summary, EchoNotes will auto-discover relevant files from your knowledge base and include them as context for the AI.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            .padding(20)
         }
-        .formStyle(.grouped)
-        .padding()
         .onAppear { scanKnowledgeBase() }
     }
 
@@ -275,49 +371,41 @@ struct DesktopSettingsView: View {
 
     @ObservedObject private var debugLog = DebugLogger.shared
 
-    private var developerTab: some View {
+    private var developerContent: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("Debug Console")
-                    .font(.headline)
                 Spacer()
                 Text("\(debugLog.entries.count) entries")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.tertiary)
                 Button("Clear") { debugLog.clear() }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            Divider()
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
 
             if debugLog.entries.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "terminal")
-                        .font(.system(size: 32))
-                        .foregroundStyle(.secondary)
+                        .font(.system(size: 28))
+                        .foregroundStyle(.tertiary)
                     Text("No log entries yet")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
-                    Text("Logs appear here as you record, transcribe, and generate summaries.")
-                        .font(.caption)
                         .foregroundStyle(.tertiary)
-                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 1) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(debugLog.entries) { entry in
                                 debugLogRow(entry)
                                     .id(entry.id)
                             }
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 4)
                     }
                     .onChange(of: debugLog.entries.count) { _, _ in
                         if let last = debugLog.entries.last {
@@ -327,7 +415,6 @@ struct DesktopSettingsView: View {
                 }
             }
         }
-        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
     }
 
     private static let logTimeFmt: DateFormatter = {
@@ -340,7 +427,7 @@ struct DesktopSettingsView: View {
         HStack(alignment: .top, spacing: 6) {
             Text(Self.logTimeFmt.string(from: entry.timestamp))
                 .font(.system(.caption2, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
 
             Text(entry.level.rawValue)
                 .font(.system(.caption2, design: .monospaced).bold())
@@ -350,7 +437,7 @@ struct DesktopSettingsView: View {
             Text(entry.category)
                 .font(.system(.caption2, design: .monospaced))
                 .foregroundStyle(.purple)
-                .frame(width: 100, alignment: .leading)
+                .frame(width: 90, alignment: .leading)
 
             Text(entry.message)
                 .font(.system(.caption2, design: .monospaced))
@@ -371,20 +458,40 @@ struct DesktopSettingsView: View {
 
     // MARK: - About
 
-    private var aboutTab: some View {
+    private var aboutContent: some View {
         VStack(spacing: 12) {
             Image(systemName: "waveform")
                 .font(.system(size: 48))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
             Text("EchoNotes")
                 .font(.title2.bold())
             Text("Local-first meeting recorder with on-device transcription via WhisperKit.")
-                .font(.body)
+                .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 300)
+                .frame(maxWidth: 280)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Shared Components
+
+    private func settingsGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline.bold())
+                .foregroundStyle(.secondary)
+            content()
+        }
+    }
+
+    private func settingsRow<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack {
+            Text(label)
+                .font(.callout)
+            Spacer()
+            content()
+        }
     }
 
     // MARK: - Test Connection
@@ -425,7 +532,6 @@ struct DesktopSettingsView: View {
                 }
 
                 if http.statusCode == 200 {
-                    // Try to extract model info from response
                     var detail = "Connected (HTTP 200)"
                     if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let responseModel = json["model"] as? String {
