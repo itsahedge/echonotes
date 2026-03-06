@@ -206,6 +206,7 @@ final class RecordingEngine: ObservableObject {
                 }
             }
 
+            lastRecordingURL = fileURL
             recordingStartTime = Date()
             isRecording = true
             logger.info("Recording started: \(fileURL.lastPathComponent)")

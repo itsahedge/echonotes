@@ -42,8 +42,14 @@ struct MainWindowView: View {
             library.scan()
         }
         .onChange(of: recorder.isRecording) { _, isRecording in
-            if !isRecording {
-                // Re-scan after recording stops so new entry appears in sidebar
+            if isRecording {
+                // Scan + select the new entry as soon as recording starts
+                library.scan()
+                if let url = recorder.lastRecordingURL {
+                    selectedEntryID = url
+                }
+            } else {
+                // Re-scan after recording stops so duration/metadata updates
                 library.scan()
             }
         }
