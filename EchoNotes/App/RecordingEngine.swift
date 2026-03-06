@@ -26,18 +26,10 @@ final class RecordingEngine: ObservableObject {
     @Published var systemLevel: Float = 0
     @Published var errorMessage: String?
     @Published var lastRecordingURL: URL?
-    @Published var autoTranscribe: Bool = UserDefaults.standard.bool(forKey: "autoTranscribe") {
-        didSet { UserDefaults.standard.set(autoTranscribe, forKey: "autoTranscribe") }
-    }
-    @Published var transcriptionModeRaw: String = UserDefaults.standard.string(forKey: "transcriptionMode") ?? TranscriptionMode.postRecording.rawValue {
-        didSet { UserDefaults.standard.set(transcriptionModeRaw, forKey: "transcriptionMode") }
-    }
-    @Published var selectedSourceId: String = UserDefaults.standard.string(forKey: "selectedMicrophone") ?? "" {
-        didSet { UserDefaults.standard.set(selectedSourceId, forKey: "selectedMicrophone") }
-    }
-    @Published var selectedSystemSourceId: String = UserDefaults.standard.string(forKey: "selectedSystemSource") ?? "" {
-        didSet { UserDefaults.standard.set(selectedSystemSourceId, forKey: "selectedSystemSource") }
-    }
+    @AppStorage("autoTranscribe") var autoTranscribe = false
+    @AppStorage("transcriptionMode") var transcriptionModeRaw: String = TranscriptionMode.postRecording.rawValue
+    @AppStorage("selectedMicrophone") var selectedSourceId: String = ""
+    @AppStorage("selectedSystemSource") var selectedSystemSourceId: String = ""
     
     var availableSources: [String] {
         MicrophoneCapture.availableDevices()
