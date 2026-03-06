@@ -19,6 +19,8 @@ struct DesktopSettingsView: View {
                 .tabItem { Label("Custom Providers", systemImage: "plus.circle") }
             knowledgeBaseTab
                 .tabItem { Label("Knowledge Base", systemImage: "book.closed") }
+            developerTab
+                .tabItem { Label("Developer", systemImage: "chevron.left.forwardslash.chevron.right") }
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -218,6 +220,104 @@ struct DesktopSettingsView: View {
             if fileURL.pathExtension.lowercased() == "md" { count += 1 }
         }
         knowledgeBaseFileCount = count
+    }
+
+    // MARK: - Developer
+
+    @ObservedObject private var debugLog = DebugLogger.shared
+
+    private var developerTab: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Debug Console")
+                    .font(.headline)
+                Spacer()
+                Text("\(debugLog.entries.count) entries")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Clear") { debugLog.clear() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            if debugLog.entries.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary)
+                    Text("No log entries yet")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Text("Logs appear here as you record, transcribe, and generate summaries.")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 1) {
+                            ForEach(debugLog.entries) { entry in
+                                debugLogRow(entry)
+                                    .id(entry.id)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                    }
+                    .onChange(of: debugLog.entries.count) { _, _ in
+                        if let last = debugLog.entries.last {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    }
+                }
+            }
+        }
+        .background(Color(nsColor: .textBackgroundColor).opacity(0.5))
+    }
+
+    private static let logTimeFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    private func debugLogRow(_ entry: DebugLogger.Entry) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(Self.logTimeFmt.string(from: entry.timestamp))
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+
+            Text(entry.level.rawValue)
+                .font(.system(.caption2, design: .monospaced).bold())
+                .foregroundStyle(logLevelColor(entry.level))
+                .frame(width: 36, alignment: .leading)
+
+            Text(entry.category)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.purple)
+                .frame(width: 100, alignment: .leading)
+
+            Text(entry.message)
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func logLevelColor(_ level: DebugLogger.Entry.Level) -> Color {
+        switch level {
+        case .info: return .green
+        case .warning: return .orange
+        case .error: return .red
+        case .debug: return .secondary
+        }
     }
 
     // MARK: - About

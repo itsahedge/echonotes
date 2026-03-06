@@ -1,10 +1,10 @@
 import Foundation
-import os
 
 /// Scans a folder of markdown files and assembles relevant context for AI summarization.
 /// Designed for Obsidian vaults but works with any folder of .md files.
-final class KnowledgeBaseService: Sendable {
-    private let logger = Logger(subsystem: "com.echonotes", category: "KnowledgeBase")
+@MainActor
+final class KnowledgeBaseService {
+    private var debugLog: DebugLogger { DebugLogger.shared }
 
     /// Maximum characters of assembled context (~2000 tokens at ~4 chars/token).
     private let maxContextChars = 8000
@@ -14,25 +14,25 @@ final class KnowledgeBaseService: Sendable {
         let vaultURL = URL(fileURLWithPath: (vaultPath as NSString).expandingTildeInPath)
 
         guard FileManager.default.fileExists(atPath: vaultURL.path) else {
-            logger.warning("Knowledge base path does not exist: \(vaultPath)")
+            debugLog.warning("Knowledge base path does not exist: \(vaultPath)", category: "KnowledgeBase")
             return nil
         }
 
         // Collect all .md files (skip .obsidian)
         let mdFiles = collectMarkdownFiles(in: vaultURL)
         guard !mdFiles.isEmpty else {
-            logger.warning("No markdown files found in: \(vaultPath)")
+            debugLog.warning("No markdown files found in: \(vaultPath)", category: "KnowledgeBase")
             return nil
         }
-        logger.info("Found \(mdFiles.count) markdown files in vault")
+        debugLog.info("Found \(mdFiles.count) markdown files in vault", category: "KnowledgeBase")
 
         // Extract keywords from transcript
         let keywords = extractKeywords(from: transcript)
         guard !keywords.isEmpty else {
-            logger.warning("No keywords extracted from transcript")
+            debugLog.warning("No keywords extracted from transcript", category: "KnowledgeBase")
             return nil
         }
-        logger.info("Extracted \(keywords.count) keywords: \(Array(keywords.prefix(10)).joined(separator: ", "))")
+        debugLog.info("Top keywords: \(Array(keywords.prefix(10)).joined(separator: ", "))", category: "KnowledgeBase")
 
         // Score and rank files
         var scored: [(url: URL, score: Int, content: String)] = []
@@ -79,13 +79,13 @@ final class KnowledgeBaseService: Sendable {
         }
 
         guard !context.isEmpty else {
-            logger.warning("No files scored high enough for inclusion")
+            debugLog.warning("No files scored high enough for inclusion", category: "KnowledgeBase")
             return nil
         }
 
-        let includedFiles = orderedFiles.prefix(while: { _ in true }).prefix(10)
-            .map { $0.url.lastPathComponent }
-        logger.info("Built knowledge base context: \(context.count) chars. Top files: \(includedFiles.joined(separator: ", "))")
+        let includedCount = orderedFiles.filter { _, _, _ in true }.prefix(10).count
+        let includedFiles = orderedFiles.prefix(10).map { "\($0.url.lastPathComponent) (\($0.score))" }
+        debugLog.info("Selected \(includedCount) files: \(includedFiles.joined(separator: ", "))", category: "KnowledgeBase")
         return context
     }
 

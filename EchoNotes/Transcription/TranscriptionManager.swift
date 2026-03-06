@@ -20,6 +20,7 @@ enum TranscriptionMode: String, CaseIterable {
 @MainActor
 final class TranscriptionManager: ObservableObject {
     private let logger = Logger(subsystem: "com.echonotes", category: "TranscriptionManager")
+    private var debugLog: DebugLogger { DebugLogger.shared }
     @Published var isTranscribing = false
     @Published var progress: Double = 0
     @Published var transcript: Transcript?
@@ -230,8 +231,10 @@ final class TranscriptionManager: ObservableObject {
         let task = Task {
             do {
                 logger.info("Starting transcription for \(audioURL.lastPathComponent)")
+                await MainActor.run { debugLog.info("Starting transcription: \(audioURL.lastPathComponent)", category: "Transcription") }
                 let engine = try await modelManager.ensureEngine(for: selectedModel)
                 logger.info("Engine ready, transcribing...")
+                await MainActor.run { debugLog.info("Whisper engine ready (model: \(self.selectedModel.rawValue)), transcribing...", category: "Transcription") }
                 whisperEngine = engine
 
                 try Task.checkCancellation()
@@ -259,6 +262,7 @@ final class TranscriptionManager: ObservableObject {
                 // Already handled by cancel()
             } catch {
                 logger.error("Transcription failed: \(error.localizedDescription)")
+                await MainActor.run { debugLog.error("Transcription failed: \(error.localizedDescription)", category: "Transcription") }
                 await MainActor.run {
                     self.error = error.localizedDescription
                 }
@@ -288,19 +292,21 @@ final class TranscriptionManager: ObservableObject {
         do {
             let config = aiConfiguration()
             let service = AIService()
+            debugLog.info("Summarizing with \(config.provider.rawValue) (\(config.model))", category: "AI")
 
             // Build knowledge base context if enabled
             var kbContext: String?
             if useKnowledgeBase, !knowledgeBasePath.isEmpty {
+                debugLog.info("Loading knowledge base from: \(knowledgeBasePath)", category: "KnowledgeBase")
                 let kbService = KnowledgeBaseService()
                 kbContext = kbService.buildContext(vaultPath: knowledgeBasePath, transcript: transcript.toPlainText())
                 if let ctx = kbContext {
-                    logger.info("Knowledge base context: \(ctx.count) chars injected into prompt")
+                    debugLog.info("Injecting \(ctx.count) chars of context into prompt", category: "KnowledgeBase")
                 } else {
-                    logger.warning("Knowledge base enabled but no relevant context found at: \(self.knowledgeBasePath)")
+                    debugLog.warning("No relevant context found in vault", category: "KnowledgeBase")
                 }
             } else if useKnowledgeBase {
-                logger.warning("Knowledge base toggle is on but path is empty")
+                debugLog.warning("Knowledge base toggle is on but path is empty", category: "KnowledgeBase")
             }
 
             self.summaryUsedKnowledgeBase = kbContext != nil
@@ -311,8 +317,10 @@ final class TranscriptionManager: ObservableObject {
             let mdURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("md")
             try result.toMarkdown().write(to: mdURL, atomically: true, encoding: .utf8)
 
+            debugLog.info("Summary generated successfully", category: "AI")
             self.summary = result
         } catch {
+            debugLog.error("Summary failed: \(error.localizedDescription)", category: "AI")
             self.error = error.localizedDescription
         }
 

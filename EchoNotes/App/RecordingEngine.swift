@@ -19,6 +19,7 @@ import os
 @MainActor
 final class RecordingEngine: ObservableObject {
     private let logger = Logger(subsystem: "com.echonotes", category: "RecordingEngine")
+    private var debugLog: DebugLogger { DebugLogger.shared }
     @Published var isRecording = false
     @Published var duration: TimeInterval = 0
     @Published var micLevel: Float = 0
@@ -208,6 +209,7 @@ final class RecordingEngine: ObservableObject {
             recordingStartTime = Date()
             isRecording = true
             logger.info("Recording started: \(fileURL.lastPathComponent)")
+            debugLog.info("Recording started: \(fileURL.lastPathComponent)", category: "Recording")
 
             // Duration timer
             durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -245,6 +247,7 @@ final class RecordingEngine: ObservableObject {
         if let url {
             lastRecordingURL = url
             logger.info("Recording stopped: \(url.lastPathComponent), duration: \(String(format: "%.1f", recordedDuration))s")
+            debugLog.info("Recording stopped: \(url.lastPathComponent) (\(String(format: "%.1f", recordedDuration))s)", category: "Recording")
 
             if transcriptionMode == .live {
                 // Finalize live transcription — flush remaining chunks
