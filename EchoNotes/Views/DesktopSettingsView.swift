@@ -1,138 +1,25 @@
 import SwiftUI
 
-/// Craft-inspired settings panel with sidebar navigation and content area.
+/// Settings content view — renders the content for a given app section.
+/// The sidebar navigation is handled by MainWindowView.
 struct DesktopSettingsView: View {
     @EnvironmentObject var recorder: RecordingEngine
     @EnvironmentObject var tm: TranscriptionManager
     @EnvironmentObject var modelManager: ModelManager
 
-    var onClose: (() -> Void)?
+    let section: AppSection
 
     @State private var connectionTestResult: ConnectionTestResult?
     @State private var isTesting = false
-    @State private var selectedSection: SettingsSection = .general
-
-    enum SettingsSection: String, CaseIterable, Identifiable {
-        case general = "General"
-        case aiProviders = "AI Providers"
-        case customProviders = "Custom Providers"
-        case knowledgeBase = "Knowledge Base"
-        case developer = "Developer"
-        case about = "About"
-
-        var id: String { rawValue }
-
-        var icon: String {
-            switch self {
-            case .general: return "gearshape"
-            case .aiProviders: return "sparkles"
-            case .customProviders: return "plus.circle"
-            case .knowledgeBase: return "book.closed"
-            case .developer: return "chevron.left.forwardslash.chevron.right"
-            case .about: return "info.circle"
-            }
-        }
-
-        var group: String {
-            switch self {
-            case .general, .aiProviders, .customProviders, .knowledgeBase:
-                return "Configuration"
-            case .developer, .about:
-                return "Other"
-            }
-        }
-    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            settingsSidebar
-            Divider()
-            settingsContentArea
-        }
-    }
-
-    // MARK: - Sidebar
-
-    private var settingsSidebar: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 2) {
-                // Configuration group
-                sectionHeader("Configuration")
-
-                ForEach([SettingsSection.general, .aiProviders, .customProviders, .knowledgeBase]) { section in
-                    sidebarRow(section)
-                }
-
-                // Other group
-                sectionHeader("Other")
-                    .padding(.top, 12)
-
-                ForEach([SettingsSection.developer, .about]) { section in
-                    sidebarRow(section)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 16)
-        }
-        .frame(width: 170)
-    }
-
-    private func sectionHeader(_ title: String) -> some View {
-        Text(title)
-            .font(.subheadline.bold())
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
-    }
-
-    private func sidebarRow(_ section: SettingsSection) -> some View {
-        Button(action: { selectedSection = section }) {
-            HStack(spacing: 8) {
-                Image(systemName: section.icon)
-                    .font(.callout)
-                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
-                    .frame(width: 18)
-                Text(section.rawValue)
-                    .font(.callout)
-                    .foregroundStyle(selectedSection == section ? .primary : .secondary)
-                Spacer()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 6)
-            .background(
-                selectedSection == section
-                    ? Color.secondary.opacity(0.15)
-                    : Color.clear
-            )
-            .cornerRadius(6)
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Content Area
-
-    private var settingsContentArea: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header with close button
-            HStack(spacing: 12) {
-                if let onClose {
-                    Button(action: onClose) {
-                        Image(systemName: "xmark")
-                            .font(.callout.bold())
-                            .foregroundStyle(.secondary)
-                            .frame(width: 28, height: 28)
-                            .background(Color.secondary.opacity(0.12))
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
-                }
-                Text(selectedSection.rawValue)
-                    .font(.title3.bold())
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.top, 16)
-            .padding(.bottom, 8)
+            // Header
+            Text(section.rawValue)
+                .font(.title3.bold())
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
 
             Divider()
                 .padding(.horizontal, 20)
@@ -145,7 +32,7 @@ struct DesktopSettingsView: View {
 
     @ViewBuilder
     private var settingsContent: some View {
-        switch selectedSection {
+        switch section {
         case .general:
             generalContent
         case .aiProviders:
@@ -158,6 +45,8 @@ struct DesktopSettingsView: View {
             developerContent
         case .about:
             aboutContent
+        case .meetings:
+            EmptyView()
         }
     }
 
