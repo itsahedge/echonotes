@@ -182,15 +182,16 @@ final class AIService: Sendable {
 
     private func summarizeOpenAICompatible(transcript: String, config: Configuration) async throws -> MeetingSummary {
         let prompt = summaryPrompt(transcript: transcript)
+        let isLocal = config.provider == .custom || config.provider == .ollama
 
-        var requestBody: [String: Any] = [
+        let requestBody: [String: Any] = [
             "model": config.model,
             "messages": [
-                ["role": "system", "content": "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."],
+                ["role": "system", "content": "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON. Do not include any explanation or thinking, just the JSON object."],
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.3,
-            "max_tokens": 2000
+            "max_tokens": isLocal ? 4096 : 2000
         ]
 
         var request = URLRequest(url: config.endpoint)
@@ -203,7 +204,8 @@ final class AIService: Sendable {
             request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-        request.timeoutInterval = 120
+        // Local models need more time — a 35B model on a long transcript can take minutes
+        request.timeoutInterval = isLocal ? 300 : 120
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
