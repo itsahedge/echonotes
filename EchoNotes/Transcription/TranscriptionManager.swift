@@ -26,6 +26,7 @@ final class TranscriptionManager: ObservableObject {
     @Published var error: String?
     @Published var isSummarizing = false
     @Published var summary: MeetingSummary?
+    @Published var summaryUsedKnowledgeBase = false
 
     // MARK: - AI Provider Settings
 
@@ -293,7 +294,16 @@ final class TranscriptionManager: ObservableObject {
             if useKnowledgeBase, !knowledgeBasePath.isEmpty {
                 let kbService = KnowledgeBaseService()
                 kbContext = kbService.buildContext(vaultPath: knowledgeBasePath, transcript: transcript.toPlainText())
+                if let ctx = kbContext {
+                    logger.info("Knowledge base context: \(ctx.count) chars injected into prompt")
+                } else {
+                    logger.warning("Knowledge base enabled but no relevant context found at: \(self.knowledgeBasePath)")
+                }
+            } else if useKnowledgeBase {
+                logger.warning("Knowledge base toggle is on but path is empty")
             }
+
+            self.summaryUsedKnowledgeBase = kbContext != nil
 
             let result = try await service.summarize(transcript: transcript.toPlainText(), config: config, knowledgeBaseContext: kbContext)
 

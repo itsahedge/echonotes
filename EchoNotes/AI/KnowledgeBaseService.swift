@@ -20,11 +20,19 @@ final class KnowledgeBaseService: Sendable {
 
         // Collect all .md files (skip .obsidian)
         let mdFiles = collectMarkdownFiles(in: vaultURL)
-        guard !mdFiles.isEmpty else { return nil }
+        guard !mdFiles.isEmpty else {
+            logger.warning("No markdown files found in: \(vaultPath)")
+            return nil
+        }
+        logger.info("Found \(mdFiles.count) markdown files in vault")
 
         // Extract keywords from transcript
         let keywords = extractKeywords(from: transcript)
-        guard !keywords.isEmpty else { return nil }
+        guard !keywords.isEmpty else {
+            logger.warning("No keywords extracted from transcript")
+            return nil
+        }
+        logger.info("Extracted \(keywords.count) keywords: \(Array(keywords.prefix(10)).joined(separator: ", "))")
 
         // Score and rank files
         var scored: [(url: URL, score: Int, content: String)] = []
@@ -70,9 +78,14 @@ final class KnowledgeBaseService: Sendable {
             if charBudget <= 0 { break }
         }
 
-        guard !context.isEmpty else { return nil }
+        guard !context.isEmpty else {
+            logger.warning("No files scored high enough for inclusion")
+            return nil
+        }
 
-        logger.info("Built knowledge base context: \(context.count) chars from \(min(orderedFiles.count, 10)) files")
+        let includedFiles = orderedFiles.prefix(while: { _ in true }).prefix(10)
+            .map { $0.url.lastPathComponent }
+        logger.info("Built knowledge base context: \(context.count) chars. Top files: \(includedFiles.joined(separator: ", "))")
         return context
     }
 

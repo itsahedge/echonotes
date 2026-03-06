@@ -154,6 +154,15 @@ struct RecordingDetailView: View {
 
     private func summarySection(_ summary: MeetingSummary) -> some View {
         VStack(alignment: .leading, spacing: 16) {
+            if tm.summaryUsedKnowledgeBase {
+                HStack(spacing: 4) {
+                    Image(systemName: "book.closed.fill")
+                    Text("Enhanced with knowledge base context")
+                }
+                .font(.caption)
+                .foregroundStyle(.purple)
+            }
+
             DisclosureGroup {
                 Text(summary.summary)
                     .font(.body)
