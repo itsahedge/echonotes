@@ -49,21 +49,21 @@ final class AIService: Sendable {
     }
 
     /// Summarize a transcript using the configured AI provider.
-    func summarize(transcript: String, config: Configuration) async throws -> MeetingSummary {
+    func summarize(transcript: String, config: Configuration, knowledgeBaseContext: String? = nil) async throws -> MeetingSummary {
         // Use ChatGPT backend Responses API when we have an account ID but no API key
         if config.chatgptAccountId != nil {
-            return try await summarizeChatGPTBackend(transcript: transcript, config: config)
+            return try await summarizeChatGPTBackend(transcript: transcript, config: config, knowledgeBaseContext: knowledgeBaseContext)
         }
 
         switch config.provider {
         case .anthropic:
-            return try await summarizeAnthropic(transcript: transcript, config: config)
+            return try await summarizeAnthropic(transcript: transcript, config: config, knowledgeBaseContext: knowledgeBaseContext)
         case .google:
-            return try await summarizeGoogle(transcript: transcript, config: config)
+            return try await summarizeGoogle(transcript: transcript, config: config, knowledgeBaseContext: knowledgeBaseContext)
         case .ollama:
-            return try await summarizeOllama(transcript: transcript, config: config)
+            return try await summarizeOllama(transcript: transcript, config: config, knowledgeBaseContext: knowledgeBaseContext)
         case .openai, .custom:
-            return try await summarizeOpenAICompatible(transcript: transcript, config: config)
+            return try await summarizeOpenAICompatible(transcript: transcript, config: config, knowledgeBaseContext: knowledgeBaseContext)
         }
     }
 
@@ -72,8 +72,8 @@ final class AIService: Sendable {
     /// Use the ChatGPT backend Responses API with OAuth access token.
     /// Same approach as Codex CLI: Bearer access_token + chatgpt-account-id header.
     /// The Codex backend requires stream: true, so we collect SSE events.
-    private func summarizeChatGPTBackend(transcript: String, config: Configuration) async throws -> MeetingSummary {
-        let prompt = summaryPrompt(transcript: transcript)
+    private func summarizeChatGPTBackend(transcript: String, config: Configuration, knowledgeBaseContext: String? = nil) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript, knowledgeBaseContext: knowledgeBaseContext)
         let systemPrompt = "You are a meeting assistant. Extract structured summaries from transcripts. Respond only with valid JSON."
 
         let requestBody: [String: Any] = [
@@ -180,8 +180,8 @@ final class AIService: Sendable {
 
     // MARK: - OpenAI-compatible (OpenAI)
 
-    private func summarizeOpenAICompatible(transcript: String, config: Configuration) async throws -> MeetingSummary {
-        let prompt = summaryPrompt(transcript: transcript)
+    private func summarizeOpenAICompatible(transcript: String, config: Configuration, knowledgeBaseContext: String? = nil) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript, knowledgeBaseContext: knowledgeBaseContext)
         let isLocal = config.provider == .custom || config.provider == .ollama
 
         let requestBody: [String: Any] = [
@@ -222,8 +222,8 @@ final class AIService: Sendable {
 
     // MARK: - Ollama
 
-    private func summarizeOllama(transcript: String, config: Configuration) async throws -> MeetingSummary {
-        let prompt = summaryPrompt(transcript: transcript)
+    private func summarizeOllama(transcript: String, config: Configuration, knowledgeBaseContext: String? = nil) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript, knowledgeBaseContext: knowledgeBaseContext)
 
         let requestBody: [String: Any] = [
             "model": config.model,
@@ -255,8 +255,8 @@ final class AIService: Sendable {
 
     // MARK: - Anthropic
 
-    private func summarizeAnthropic(transcript: String, config: Configuration) async throws -> MeetingSummary {
-        let prompt = summaryPrompt(transcript: transcript)
+    private func summarizeAnthropic(transcript: String, config: Configuration, knowledgeBaseContext: String? = nil) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript, knowledgeBaseContext: knowledgeBaseContext)
 
         let requestBody: [String: Any] = [
             "model": config.model,
@@ -290,8 +290,8 @@ final class AIService: Sendable {
 
     // MARK: - Google Gemini
 
-    private func summarizeGoogle(transcript: String, config: Configuration) async throws -> MeetingSummary {
-        let prompt = summaryPrompt(transcript: transcript)
+    private func summarizeGoogle(transcript: String, config: Configuration, knowledgeBaseContext: String? = nil) async throws -> MeetingSummary {
+        let prompt = summaryPrompt(transcript: transcript, knowledgeBaseContext: knowledgeBaseContext)
 
         let endpointURL = URL(string: "\(config.provider.defaultEndpoint)/\(config.model):generateContent?key=\(config.apiKey)")!
 
@@ -327,8 +327,8 @@ final class AIService: Sendable {
 
     // MARK: - Shared Prompt
 
-    private func summaryPrompt(transcript: String) -> String {
-        """
+    private func summaryPrompt(transcript: String, knowledgeBaseContext: String? = nil) -> String {
+        var prompt = """
         Analyze this meeting transcript and provide a structured summary.
 
         Respond ONLY with valid JSON in this exact format:
@@ -340,10 +340,24 @@ final class AIService: Sendable {
         }
 
         If a section has no items, use an empty array.
+        """
 
-        TRANSCRIPT:
+        if let context = knowledgeBaseContext {
+            prompt += """
+
+            \nUse the following project knowledge base for context. Reference correct terminology, people, and prior decisions where relevant:
+
+            \(context)
+            """
+        }
+
+        prompt += """
+
+        \nTRANSCRIPT:
         \(transcript)
         """
+
+        return prompt
     }
 
     /// Parse OpenAI chat completion response into MeetingSummary.

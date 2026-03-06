@@ -17,6 +17,8 @@ struct DesktopSettingsView: View {
                 .tabItem { Label("AI Providers", systemImage: "sparkles") }
             customTab
                 .tabItem { Label("Custom Providers", systemImage: "plus.circle") }
+            knowledgeBaseTab
+                .tabItem { Label("Knowledge Base", systemImage: "book.closed") }
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
@@ -134,6 +136,88 @@ struct DesktopSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    // MARK: - Knowledge Base
+
+    @State private var knowledgeBaseFileCount: Int?
+
+    private var knowledgeBaseTab: some View {
+        Form {
+            Section {
+                Text("Point to a folder of markdown files (e.g., an Obsidian vault) to give AI summaries contextual knowledge about your project, team, and prior decisions.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Folder Path") {
+                HStack {
+                    TextField("Path", text: $tm.knowledgeBasePath, prompt: Text("~/Documents/my-vault"))
+                        .textFieldStyle(.roundedBorder)
+                    Button("Browse...") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        panel.allowsMultipleSelection = false
+                        if panel.runModal() == .OK, let url = panel.url {
+                            tm.knowledgeBasePath = url.path
+                            scanKnowledgeBase()
+                        }
+                    }
+                }
+
+                if let count = knowledgeBaseFileCount {
+                    Label("\(count) markdown files found", systemImage: "doc.text")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                } else if !tm.knowledgeBasePath.isEmpty {
+                    Label("Folder not found", systemImage: "exclamationmark.triangle")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section {
+                Toggle("Include knowledge base context in AI summaries", isOn: $tm.useKnowledgeBase)
+                    .disabled(tm.knowledgeBasePath.isEmpty)
+
+                if tm.useKnowledgeBase && !tm.knowledgeBasePath.isEmpty {
+                    Text("When generating a summary, EchoNotes will auto-discover relevant files from your knowledge base and include them as context for the AI.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
+        .onAppear { scanKnowledgeBase() }
+    }
+
+    private func scanKnowledgeBase() {
+        guard !tm.knowledgeBasePath.isEmpty else {
+            knowledgeBaseFileCount = nil
+            return
+        }
+        let path = (tm.knowledgeBasePath as NSString).expandingTildeInPath
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            knowledgeBaseFileCount = nil
+            return
+        }
+        let fm = FileManager.default
+        guard let enumerator = fm.enumerator(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            knowledgeBaseFileCount = nil
+            return
+        }
+        var count = 0
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathExtension.lowercased() == "md" { count += 1 }
+        }
+        knowledgeBaseFileCount = count
     }
 
     // MARK: - About
