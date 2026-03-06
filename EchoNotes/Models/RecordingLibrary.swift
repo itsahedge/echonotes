@@ -66,10 +66,9 @@ final class RecordingLibrary: ObservableObject {
 
     var filteredEntries: [RecordingEntry] {
         guard !searchQuery.isEmpty else { return entries }
-        let query = searchQuery.lowercased()
         return entries.filter { entry in
-            entry.filename.lowercased().contains(query) ||
-            (entry.fullTranscriptText?.lowercased().contains(query) ?? false)
+            entry.filename.localizedStandardContains(searchQuery) ||
+            (entry.fullTranscriptText?.localizedStandardContains(searchQuery) ?? false)
         }
     }
 
@@ -136,6 +135,7 @@ final class RecordingLibrary: ObservableObject {
             entry.url.deletingPathExtension().appendingPathExtension("txt"),
             entry.url.deletingPathExtension().appendingPathExtension("json"),
             entry.url.deletingPathExtension().appendingPathExtension("md"),
+            entry.url.deletingPathExtension().appendingPathExtension("summary.json"),
         ]
         for url in urls where fm.fileExists(atPath: url.path) {
             try? fm.trashItem(at: url, resultingItemURL: nil)
