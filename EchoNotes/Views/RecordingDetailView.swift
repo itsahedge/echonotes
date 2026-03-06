@@ -153,79 +153,94 @@ struct RecordingDetailView: View {
     // MARK: - Summary Section
 
     private func summarySection(_ summary: MeetingSummary) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            DisclosureGroup {
+        VStack(alignment: .leading, spacing: 12) {
+            // Summary card
+            summaryCard(
+                icon: "doc.text",
+                title: "Summary",
+                color: .blue
+            ) {
                 Text(summary.summary)
                     .font(.body)
-                    .padding(.top, 4)
-            } label: {
-                Label("Summary", systemImage: "doc.text")
-                    .font(.headline)
-                    .foregroundStyle(.blue)
+                    .lineSpacing(4)
             }
 
             if !summary.actionItems.isEmpty {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 4) {
+                summaryCard(
+                    icon: "checkmark.circle",
+                    title: "Action Items",
+                    color: .green
+                ) {
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(summary.actionItems, id: \.self) { item in
                             bulletItem(item)
                         }
                     }
-                    .padding(.top, 4)
-                } label: {
-                    Label("Action Items", systemImage: "checkmark.circle")
-                        .font(.headline)
-                        .foregroundStyle(.green)
                 }
             }
 
             if !summary.keyDecisions.isEmpty {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 4) {
+                summaryCard(
+                    icon: "star.fill",
+                    title: "Key Decisions",
+                    color: .orange
+                ) {
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(summary.keyDecisions, id: \.self) { item in
                             bulletItem(item)
                         }
                     }
-                    .padding(.top, 4)
-                } label: {
-                    Label("Key Decisions", systemImage: "star.fill")
-                        .font(.headline)
-                        .foregroundStyle(.orange)
                 }
             }
 
             if !summary.openQuestions.isEmpty {
-                DisclosureGroup {
-                    VStack(alignment: .leading, spacing: 4) {
+                summaryCard(
+                    icon: "questionmark.circle",
+                    title: "Open Questions",
+                    color: .purple
+                ) {
+                    VStack(alignment: .leading, spacing: 6) {
                         ForEach(summary.openQuestions, id: \.self) { item in
                             bulletItem(item)
                         }
                     }
-                    .padding(.top, 4)
-                } label: {
-                    Label("Open Questions", systemImage: "questionmark.circle")
-                        .font(.headline)
-                        .foregroundStyle(.purple)
                 }
             }
 
             // Regenerate button
-            HStack {
-                Button(action: { generateSummary() }) {
-                    if isSummarizing {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Label("Regenerate", systemImage: "arrow.clockwise")
-                    }
+            Button(action: { generateSummary() }) {
+                if isSummarizing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Regenerate", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .disabled(isSummarizing)
             }
+            .buttonStyle(.bordered)
+            .disabled(isSummarizing)
         }
     }
 
+    private func summaryCard<Content: View>(
+        icon: String,
+        title: String,
+        color: Color,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: icon)
+                .font(.subheadline.bold())
+                .foregroundStyle(color)
+
+            content()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06))
+        .cornerRadius(8)
+    }
+
     private func bulletItem(_ text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 8) {
             Text("\u{2022}")
                 .foregroundStyle(.secondary)
             Text(text)
@@ -235,14 +250,27 @@ struct RecordingDetailView: View {
 
     // MARK: - Transcript Section
 
-    private func transcriptSection(_ transcript: Transcript) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            let hasSpeakers = transcript.segments.contains { $0.speaker != nil }
+    @State private var showTranscript = false
 
-            DisclosureGroup {
+    private func transcriptSection(_ transcript: Transcript) -> some View {
+        let hasSpeakers = transcript.segments.contains { $0.speaker != nil }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Button(action: { withAnimation { showTranscript.toggle() } }) {
+                HStack {
+                    Label("Full Transcript", systemImage: "text.justify.leading")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Image(systemName: showTranscript ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+
+            if showTranscript {
                 VStack(alignment: .leading, spacing: 6) {
                     if hasSpeakers {
-                        // Speaker legend
                         HStack(spacing: 12) {
                             ForEach([Speaker.user, .remote], id: \.rawValue) { speaker in
                                 Label(speaker.rawValue, systemImage: speaker.icon)
@@ -252,7 +280,6 @@ struct RecordingDetailView: View {
                         }
                         .padding(.bottom, 4)
 
-                        // Diarized transcript
                         ForEach(Array(transcript.segments.enumerated()), id: \.offset) { _, segment in
                             let text = segment.cleanText
                             if !text.isEmpty {
@@ -276,13 +303,11 @@ struct RecordingDetailView: View {
                             .textSelection(.enabled)
                     }
                 }
-                .padding(.top, 4)
-            } label: {
-                Label("Full Transcript", systemImage: "text.justify.leading")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
             }
         }
+        .padding(12)
+        .background(Color.secondary.opacity(0.06))
+        .cornerRadius(8)
     }
 
     // MARK: - Summary Generation

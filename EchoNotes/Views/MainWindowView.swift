@@ -25,7 +25,9 @@ struct MainWindowView: View {
 
                 if showingSettings {
                     Divider()
-                    DesktopSettingsView()
+                    DesktopSettingsView(onClose: {
+                            withAnimation(.easeInOut(duration: 0.2)) { showingSettings = false }
+                        })
                         .frame(width: 520)
                         .transition(.move(edge: .trailing))
                 }
