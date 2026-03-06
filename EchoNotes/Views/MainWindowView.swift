@@ -8,6 +8,7 @@ struct MainWindowView: View {
     @EnvironmentObject var library: RecordingLibrary
 
     @State private var selectedEntryID: URL?
+    @State private var showingSettings = false
 
     private var selectedEntry: RecordingEntry? {
         guard let id = selectedEntryID else { return nil }
@@ -46,7 +47,9 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if recorder.isRecording || tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
+        if showingSettings {
+            DesktopSettingsView()
+        } else if recorder.isRecording || tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
             ActiveRecordingView()
         } else if let entry = selectedEntry {
             RecordingDetailView(entry: entry)
@@ -99,9 +102,10 @@ struct MainWindowView: View {
         .frame(width: 200)
 
         // Settings
-        SettingsLink {
+        Button(action: { showingSettings.toggle() }) {
             Image(systemName: "gearshape")
         }
+        .help(showingSettings ? "Close Settings" : "Settings")
 
         // Record / Stop button
         Button(action: {
