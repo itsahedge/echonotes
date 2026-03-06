@@ -38,6 +38,8 @@ final class TranscriptionManager: ObservableObject {
     private static let customEndpointDefaultsKey = "customEndpoint"
     private static let customModelDefaultsKey = "customModel"
     private static let customAPIKeyDefaultsKey = "customAPIKey"
+    private static let knowledgeBasePathDefaultsKey = "knowledgeBasePath"
+    private static let useKnowledgeBaseDefaultsKey = "useKnowledgeBase"
 
     /// API key for the selected AI provider.
     @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
@@ -83,6 +85,16 @@ final class TranscriptionManager: ObservableObject {
     /// Optional API key for the custom endpoint.
     @Published var customAPIKey: String = UserDefaults.standard.string(forKey: customAPIKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(customAPIKey, forKey: Self.customAPIKeyDefaultsKey) }
+    }
+
+    /// Path to a knowledge base folder (e.g., Obsidian vault) for contextual summaries.
+    @Published var knowledgeBasePath: String = UserDefaults.standard.string(forKey: knowledgeBasePathDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(knowledgeBasePath, forKey: Self.knowledgeBasePathDefaultsKey) }
+    }
+
+    /// Whether to include knowledge base context in AI summaries.
+    @Published var useKnowledgeBase: Bool = UserDefaults.standard.bool(forKey: useKnowledgeBaseDefaultsKey) {
+        didSet { UserDefaults.standard.set(useKnowledgeBase, forKey: Self.useKnowledgeBaseDefaultsKey) }
     }
 
     /// OAuth manager for ChatGPT login
@@ -275,7 +287,15 @@ final class TranscriptionManager: ObservableObject {
         do {
             let config = aiConfiguration()
             let service = AIService()
-            let result = try await service.summarize(transcript: transcript.toPlainText(), config: config)
+
+            // Build knowledge base context if enabled
+            var kbContext: String?
+            if useKnowledgeBase, !knowledgeBasePath.isEmpty {
+                let kbService = KnowledgeBaseService()
+                kbContext = kbService.buildContext(vaultPath: knowledgeBasePath, transcript: transcript.toPlainText())
+            }
+
+            let result = try await service.summarize(transcript: transcript.toPlainText(), config: config, knowledgeBaseContext: kbContext)
 
             // Save as .md alongside the recording
             let mdURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("md")
