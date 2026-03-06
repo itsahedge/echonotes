@@ -141,21 +141,20 @@ struct DesktopSettingsView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(tm.customEndpoint.isEmpty || isTesting)
+                }
 
-                    Button(action: {
-                        tm.selectedProvider = .custom
-                        tm.selectedAIModel = tm.customModel.isEmpty ? "default" : tm.customModel
-                    }) {
-                        Text(tm.selectedProvider == .custom ? "Active" : "Use This Provider")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(tm.customEndpoint.isEmpty || tm.selectedProvider == .custom)
-
-                    if tm.selectedProvider == .custom {
-                        Label("Currently active", systemImage: "checkmark.circle.fill")
-                            .font(.callout)
+                if tm.selectedProvider == .custom {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
                             .foregroundStyle(.green)
+                        Text("Selected as active provider in AI Providers")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
                     }
+                } else {
+                    Text("To use this provider, select \"Custom (OpenAI-compatible)\" in AI Providers.")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
                 }
 
                 if let result = connectionTestResult {
