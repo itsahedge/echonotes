@@ -6,6 +6,7 @@ enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
     case anthropic = "Anthropic"
     case google = "Google Gemini"
     case ollama = "Ollama (Local)"
+    case custom = "Custom (OpenAI-compatible)"
 
     var id: String { rawValue }
 
@@ -19,12 +20,16 @@ enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .anthropic: return "sk-ant-..."
         case .google: return "AIza..."
         case .ollama: return "No API key needed"
+        case .custom: return "Optional API key"
         }
     }
 
     /// Whether this provider requires an API key.
     var requiresAPIKey: Bool {
-        self != .ollama
+        switch self {
+        case .ollama, .custom: return false
+        default: return true
+        }
     }
 
     /// Default API endpoint.
@@ -34,6 +39,7 @@ enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .anthropic: return "https://api.anthropic.com/v1/messages"
         case .google: return "https://generativelanguage.googleapis.com/v1beta/models"
         case .ollama: return "http://localhost:11434/v1/chat/completions"
+        case .custom: return "http://localhost:8080/v1/chat/completions"
         }
     }
 
@@ -44,6 +50,7 @@ enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .anthropic: return "claude-sonnet-4-5"
         case .google: return "gemini-2.0-flash"
         case .ollama: return "llama3.2"
+        case .custom: return "default"
         }
     }
 
@@ -54,6 +61,7 @@ enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .anthropic: return ["claude-sonnet-4-5", "claude-haiku-3-5"]
         case .google: return ["gemini-2.0-flash", "gemini-2.5-pro"]
         case .ollama: return ["llama3.2", "llama3.1", "mistral", "gemma2"]
+        case .custom: return []
         }
     }
 

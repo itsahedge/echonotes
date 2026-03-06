@@ -35,6 +35,9 @@ final class TranscriptionManager: ObservableObject {
     private static let providerDefaultsKey = "aiProvider"
     private static let aiModelDefaultsKey = "aiModel"
     private static let whisperModelDefaultsKey = "whisperModel"
+    private static let customEndpointDefaultsKey = "customEndpoint"
+    private static let customModelDefaultsKey = "customModel"
+    private static let customAPIKeyDefaultsKey = "customAPIKey"
 
     /// API key for the selected AI provider.
     @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
@@ -67,6 +70,21 @@ final class TranscriptionManager: ObservableObject {
         didSet { UserDefaults.standard.set(selectedAIModel, forKey: Self.aiModelDefaultsKey) }
     }
 
+    /// Custom OpenAI-compatible endpoint URL.
+    @Published var customEndpoint: String = UserDefaults.standard.string(forKey: customEndpointDefaultsKey) ?? "http://localhost:8080/v1/chat/completions" {
+        didSet { UserDefaults.standard.set(customEndpoint, forKey: Self.customEndpointDefaultsKey) }
+    }
+
+    /// Custom model name for the custom endpoint.
+    @Published var customModel: String = UserDefaults.standard.string(forKey: customModelDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(customModel, forKey: Self.customModelDefaultsKey) }
+    }
+
+    /// Optional API key for the custom endpoint.
+    @Published var customAPIKey: String = UserDefaults.standard.string(forKey: customAPIKeyDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(customAPIKey, forKey: Self.customAPIKeyDefaultsKey) }
+    }
+
     /// OAuth manager for ChatGPT login
     let oauthManager = OAuthManager()
     private var oauthCancellable: AnyCancellable?
@@ -83,6 +101,9 @@ final class TranscriptionManager: ObservableObject {
         // OAuth: either API key or access token via ChatGPT backend
         if selectedProvider == .openai, oauthManager.isAuthenticated {
             return true
+        }
+        if selectedProvider == .custom {
+            return !customEndpoint.isEmpty
         }
         if selectedProvider.requiresAPIKey {
             return !openaiAPIKey.isEmpty
@@ -113,6 +134,15 @@ final class TranscriptionManager: ObservableObject {
                     chatgptAccountId: tokens.accountId
                 )
             }
+        }
+
+        if selectedProvider == .custom {
+            return AIService.Configuration(
+                apiKey: customAPIKey,
+                model: customModel.isEmpty ? "default" : customModel,
+                endpoint: URL(string: customEndpoint) ?? URL(string: "http://localhost:8080/v1/chat/completions")!,
+                provider: .custom
+            )
         }
 
         return AIService.Configuration(
