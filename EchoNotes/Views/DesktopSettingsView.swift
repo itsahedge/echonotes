@@ -6,6 +6,9 @@ struct DesktopSettingsView: View {
     @EnvironmentObject var tm: TranscriptionManager
     @EnvironmentObject var modelManager: ModelManager
 
+    @State private var connectionTestResult: ConnectionTestResult?
+    @State private var isTesting = false
+
     var body: some View {
         TabView {
             generalTab
@@ -88,7 +91,20 @@ struct DesktopSettingsView: View {
             }
 
             Section {
-                HStack {
+                HStack(spacing: 12) {
+                    Button(action: { testConnection() }) {
+                        HStack(spacing: 4) {
+                            if isTesting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "network")
+                            }
+                            Text(isTesting ? "Testing..." : "Test Connection")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(tm.customEndpoint.isEmpty || isTesting)
+
                     Button(action: {
                         tm.selectedProvider = .custom
                         tm.selectedAIModel = tm.customModel.isEmpty ? "default" : tm.customModel
@@ -104,10 +120,79 @@ struct DesktopSettingsView: View {
                             .foregroundStyle(.green)
                     }
                 }
+
+                if let result = connectionTestResult {
+                    HStack(spacing: 6) {
+                        Image(systemName: result.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                            .foregroundStyle(result.success ? .green : .red)
+                        Text(result.message)
+                            .font(.callout)
+                            .foregroundColor(result.success ? .primary : .red)
+                    }
+                }
             }
         }
         .formStyle(.grouped)
         .padding()
+    }
+
+    // MARK: - About
+
+    // MARK: - Test Connection
+
+    private func testConnection() {
+        guard let url = URL(string: tm.customEndpoint) else {
+            connectionTestResult = ConnectionTestResult(success: false, message: "Invalid URL")
+            return
+        }
+
+        isTesting = true
+        connectionTestResult = nil
+
+        Task {
+            do {
+                let model = tm.customModel.isEmpty ? "default" : tm.customModel
+                let body: [String: Any] = [
+                    "model": model,
+                    "messages": [["role": "user", "content": "Say hi"]],
+                    "max_tokens": 5
+                ]
+
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                if !tm.customAPIKey.isEmpty {
+                    request.setValue("Bearer \(tm.customAPIKey)", forHTTPHeaderField: "Authorization")
+                }
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                request.timeoutInterval = 10
+
+                let (data, response) = try await URLSession.shared.data(for: request)
+
+                guard let http = response as? HTTPURLResponse else {
+                    connectionTestResult = ConnectionTestResult(success: false, message: "No response")
+                    isTesting = false
+                    return
+                }
+
+                if http.statusCode == 200 {
+                    // Try to extract model info from response
+                    var detail = "Connected (HTTP 200)"
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let responseModel = json["model"] as? String {
+                        detail = "Connected — model: \(responseModel)"
+                    }
+                    connectionTestResult = ConnectionTestResult(success: true, message: detail)
+                } else {
+                    let body = String(data: data, encoding: .utf8) ?? ""
+                    let short = body.prefix(100)
+                    connectionTestResult = ConnectionTestResult(success: false, message: "HTTP \(http.statusCode): \(short)")
+                }
+            } catch {
+                connectionTestResult = ConnectionTestResult(success: false, message: error.localizedDescription)
+            }
+            isTesting = false
+        }
     }
 
     // MARK: - About
@@ -127,4 +212,9 @@ struct DesktopSettingsView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+private struct ConnectionTestResult {
+    let success: Bool
+    let message: String
 }
