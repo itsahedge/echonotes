@@ -130,7 +130,7 @@ struct SettingsView: View {
                         Text(provider.displayName).tag(provider)
                     }
                 }
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
                 .onChange(of: tm.selectedProvider) { _, newValue in
                     tm.selectedAIModel = newValue.defaultModel
                     if newValue.requiresAPIKey && apiKeyInput.isEmpty {

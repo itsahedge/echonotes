@@ -19,7 +19,17 @@ struct MainWindowView: View {
         NavigationSplitView {
             SidebarView(selectedEntryID: $selectedEntryID)
         } detail: {
-            detailContent
+            HStack(spacing: 0) {
+                detailContent
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if showingSettings {
+                    Divider()
+                    DesktopSettingsView()
+                        .frame(width: 520)
+                        .transition(.move(edge: .trailing))
+                }
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .automatic) {
@@ -47,9 +57,7 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if showingSettings {
-            DesktopSettingsView()
-        } else if recorder.isRecording || tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
+        if recorder.isRecording || tm.isTranscribing || modelManager.isDownloading || modelManager.isLoading {
             ActiveRecordingView()
         } else if let entry = selectedEntry {
             RecordingDetailView(entry: entry)
@@ -102,7 +110,7 @@ struct MainWindowView: View {
         .frame(width: 200)
 
         // Settings
-        Button(action: { showingSettings.toggle() }) {
+        Button(action: { withAnimation(.easeInOut(duration: 0.2)) { showingSettings.toggle() } }) {
             Image(systemName: "gearshape")
         }
         .help(showingSettings ? "Close Settings" : "Settings")
