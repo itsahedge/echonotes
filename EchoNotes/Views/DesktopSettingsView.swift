@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// macOS Settings window with tabs for General, AI, and About.
+/// macOS Settings window with tabs for General, AI, Custom Providers, and About.
 struct DesktopSettingsView: View {
     @EnvironmentObject var recorder: RecordingEngine
     @EnvironmentObject var tm: TranscriptionManager
@@ -11,11 +11,13 @@ struct DesktopSettingsView: View {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
             aiTab
-                .tabItem { Label("AI", systemImage: "sparkles") }
+                .tabItem { Label("AI Providers", systemImage: "sparkles") }
+            customTab
+                .tabItem { Label("Custom Providers", systemImage: "plus.circle") }
             aboutTab
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 400)
+        .frame(width: 560, height: 480)
     }
 
     // MARK: - General
@@ -47,11 +49,65 @@ struct DesktopSettingsView: View {
         .padding()
     }
 
-    // MARK: - AI
+    // MARK: - AI Providers
 
     private var aiTab: some View {
-        SettingsView(tm: tm, onBack: {})
+        SettingsView(tm: tm)
             .padding()
+    }
+
+    // MARK: - Custom Providers
+
+    private var customTab: some View {
+        Form {
+            Section {
+                Text("Connect to any OpenAI-compatible API endpoint (llama.cpp, vLLM, LM Studio, text-generation-webui, etc).")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Endpoint") {
+                TextField("URL", text: $tm.customEndpoint, prompt: Text("http://localhost:8080/v1/chat/completions"))
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            Section("Model") {
+                TextField("Model name", text: $tm.customModel, prompt: Text("e.g. qwen3.5-35b-a3b"))
+                    .textFieldStyle(.roundedBorder)
+                Text("The model name sent in the request body. Check your server's /v1/models endpoint for available models.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("API Key (optional)") {
+                SecureField("API key", text: $tm.customAPIKey, prompt: Text("Leave empty if not required"))
+                    .textFieldStyle(.roundedBorder)
+                Text("Only needed if your server requires authentication.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                HStack {
+                    Button(action: {
+                        tm.selectedProvider = .custom
+                        tm.selectedAIModel = tm.customModel.isEmpty ? "default" : tm.customModel
+                    }) {
+                        Text(tm.selectedProvider == .custom ? "Active" : "Use This Provider")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(tm.customEndpoint.isEmpty || tm.selectedProvider == .custom)
+
+                    if tm.selectedProvider == .custom {
+                        Label("Currently active", systemImage: "checkmark.circle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.green)
+                    }
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding()
     }
 
     // MARK: - About

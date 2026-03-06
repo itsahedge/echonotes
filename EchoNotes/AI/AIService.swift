@@ -62,7 +62,7 @@ final class AIService: Sendable {
             return try await summarizeGoogle(transcript: transcript, config: config)
         case .ollama:
             return try await summarizeOllama(transcript: transcript, config: config)
-        case .openai:
+        case .openai, .custom:
             return try await summarizeOpenAICompatible(transcript: transcript, config: config)
         }
     }
@@ -214,7 +214,9 @@ final class AIService: Sendable {
 
         var request = URLRequest(url: config.endpoint)
         request.httpMethod = "POST"
-        request.setValue(config.provider.authHeaderValue(apiKey: config.apiKey), forHTTPHeaderField: config.provider.authHeaderName)
+        if !config.apiKey.isEmpty {
+            request.setValue(config.provider.authHeaderValue(apiKey: config.apiKey), forHTTPHeaderField: config.provider.authHeaderName)
+        }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let accountId = config.chatgptAccountId {
             request.setValue(accountId, forHTTPHeaderField: "chatgpt-account-id")
