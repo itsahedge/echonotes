@@ -30,6 +30,10 @@ If the build fails, fix it before committing. Do not push broken code and fix it
 - **No Keychain for API keys** — triggers macOS permission dialogs, `UserDefaults` is sufficient for sandboxed app
 - `AIService.Configuration` supports both API key auth and ChatGPT backend auth (`chatgptAccountId` header)
 
+## Skills
+
+- **Always use the `swiftui-pro` skill** when reading, writing, or reviewing SwiftUI code. This is mandatory for all SwiftUI work in this project.
+
 ## Common Pitfalls
 
 - Watch for brace balance when editing Swift files — stray `}` can close a class early
