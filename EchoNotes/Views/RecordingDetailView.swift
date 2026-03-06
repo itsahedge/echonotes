@@ -291,13 +291,29 @@ struct RecordingDetailView: View {
         guard let transcript, !isSummarizing else { return }
         isSummarizing = true
         summaryError = nil
+        let debugLog = DebugLogger.shared
 
         Task {
             do {
                 let service = AIService()
                 let config = tm.aiConfiguration()
                 let text = transcript.toPlainText()
-                let result = try await service.summarize(transcript: text, config: config)
+                debugLog.info("Summarizing with \(config.provider.rawValue) (\(config.model))", category: "AI")
+
+                // Build knowledge base context if enabled
+                var kbContext: String?
+                if tm.useKnowledgeBase, !tm.knowledgeBasePath.isEmpty {
+                    debugLog.info("Loading knowledge base from: \(tm.knowledgeBasePath)", category: "KnowledgeBase")
+                    let kbService = KnowledgeBaseService()
+                    kbContext = kbService.buildContext(vaultPath: tm.knowledgeBasePath, transcript: text)
+                    if let ctx = kbContext {
+                        debugLog.info("Injecting \(ctx.count) chars of vault context into prompt", category: "KnowledgeBase")
+                    } else {
+                        debugLog.warning("No relevant context found in vault", category: "KnowledgeBase")
+                    }
+                }
+
+                let result = try await service.summarize(transcript: text, config: config, knowledgeBaseContext: kbContext)
 
                 let mdURL = entry.url.deletingPathExtension().appendingPathExtension("md")
                 try result.toMarkdown().write(to: mdURL, atomically: true, encoding: .utf8)
@@ -306,8 +322,10 @@ struct RecordingDetailView: View {
                 let encoded = try JSONEncoder().encode(result)
                 try encoded.write(to: jsonSummaryURL, options: .atomic)
 
+                debugLog.info("Summary generated successfully", category: "AI")
                 summary = result
             } catch {
+                debugLog.error("Summary failed: \(error.localizedDescription)", category: "AI")
                 summaryError = error.localizedDescription
             }
             isSummarizing = false
