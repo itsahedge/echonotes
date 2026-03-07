@@ -1,4 +1,5 @@
 import Foundation
+import os
 @preconcurrency import AVFoundation
 
 /// Transcribes audio in near-real-time during recording by processing chunks through Whisper.
@@ -12,6 +13,7 @@ import Foundation
 /// then drained on the MainActor for processing.
 @MainActor
 final class StreamingTranscriber: ObservableObject {
+    private let logger = Logger(subsystem: "com.echonotes", category: "StreamingTranscriber")
     @Published var segments: [TranscriptSegment] = []
     /// Older segments flushed from live memory to prevent unbounded growth.
     private(set) var flushedSegments: [TranscriptSegment] = []
@@ -59,9 +61,12 @@ final class StreamingTranscriber: ObservableObject {
 
         let threshold = Int(chunkSeconds * sampleRate)
         if count >= threshold {
+            logger.info("Threshold reached: \(count) samples (threshold: \(threshold)), triggering processing")
             Task { @MainActor in
                 self.drainAndProcess()
             }
+        } else {
+            logger.debug("Buffered \(count) samples (threshold: \(threshold))")
         }
     }
 
@@ -101,6 +106,7 @@ final class StreamingTranscriber: ObservableObject {
         let drained = incomingSamples
         incomingSamples.removeAll(keepingCapacity: true)
         sampleLock.unlock()
+        logger.info("drainAndProcess: \(drained.count) samples")
 
         guard !drained.isEmpty else { return }
         processChunk(drained)

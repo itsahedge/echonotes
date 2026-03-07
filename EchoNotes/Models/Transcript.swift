@@ -1,7 +1,7 @@
 import Foundation
 
 /// A single segment of transcribed speech with timing information.
-struct TranscriptSegment: Codable, Sendable, Equatable {
+struct TranscriptSegment: Codable, Sendable, Equatable, Hashable {
     let startTime: TimeInterval
     let endTime: TimeInterval
     let text: String
