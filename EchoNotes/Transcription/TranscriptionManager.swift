@@ -41,6 +41,7 @@ final class TranscriptionManager: ObservableObject {
     private static let customAPIKeyDefaultsKey = "customAPIKey"
     private static let knowledgeBasePathDefaultsKey = "knowledgeBasePath"
     private static let useKnowledgeBaseDefaultsKey = "useKnowledgeBase"
+    private static let anthropicSetupTokenDefaultsKey = "anthropicSetupToken"
 
     /// API key for the selected AI provider.
     @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
@@ -98,6 +99,15 @@ final class TranscriptionManager: ObservableObject {
         didSet { UserDefaults.standard.set(useKnowledgeBase, forKey: Self.useKnowledgeBaseDefaultsKey) }
     }
 
+    /// Setup token from `claude setup-token` for Anthropic subscription auth.
+    @Published var anthropicSetupToken: String = UserDefaults.standard.string(forKey: anthropicSetupTokenDefaultsKey) ?? "" {
+        didSet { UserDefaults.standard.set(anthropicSetupToken, forKey: Self.anthropicSetupTokenDefaultsKey) }
+    }
+
+    var isAnthropicSubscriptionAuthenticated: Bool {
+        !anthropicSetupToken.isEmpty
+    }
+
     /// OAuth manager for ChatGPT login
     let oauthManager = OAuthManager()
     private var oauthCancellable: AnyCancellable?
@@ -111,17 +121,18 @@ final class TranscriptionManager: ObservableObject {
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
-        // OAuth: either API key or access token via ChatGPT backend
-        if selectedProvider == .openai, oauthManager.isAuthenticated {
+        switch selectedProvider {
+        case .openai:
+            return oauthManager.isAuthenticated || !openaiAPIKey.isEmpty
+        case .anthropic:
+            return !anthropicAPIKey.isEmpty || !anthropicSetupToken.isEmpty
+        case .google:
+            return !googleAPIKey.isEmpty
+        case .custom:
+            return !customEndpoint.isEmpty
+        case .ollama:
             return true
         }
-        if selectedProvider == .custom {
-            return !customEndpoint.isEmpty
-        }
-        if selectedProvider.requiresAPIKey {
-            return !openaiAPIKey.isEmpty
-        }
-        return true // Ollama doesn't need a key
     }
 
     /// Build an AIService.Configuration from current settings.
@@ -149,6 +160,17 @@ final class TranscriptionManager: ObservableObject {
             }
         }
 
+        // Anthropic subscription auth via setup token
+        if selectedProvider == .anthropic, !anthropicSetupToken.isEmpty {
+            return AIService.Configuration(
+                apiKey: anthropicSetupToken,
+                model: selectedAIModel,
+                endpoint: URL(string: selectedProvider.defaultEndpoint)!,
+                provider: selectedProvider,
+                anthropicBearerAuth: true
+            )
+        }
+
         if selectedProvider == .custom {
             return AIService.Configuration(
                 apiKey: customAPIKey,
@@ -158,8 +180,17 @@ final class TranscriptionManager: ObservableObject {
             )
         }
 
+        // Per-provider API key
+        let apiKey: String
+        switch selectedProvider {
+        case .openai: apiKey = openaiAPIKey
+        case .anthropic: apiKey = anthropicAPIKey
+        case .google: apiKey = googleAPIKey
+        default: apiKey = ""
+        }
+
         return AIService.Configuration(
-            apiKey: openaiAPIKey,
+            apiKey: apiKey,
             model: selectedAIModel,
             endpoint: URL(string: selectedProvider.defaultEndpoint)!,
             provider: selectedProvider

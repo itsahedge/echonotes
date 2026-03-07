@@ -38,13 +38,15 @@ final class AIService: Sendable {
         let endpoint: URL
         let provider: AIProvider
         let chatgptAccountId: String?
+        let anthropicBearerAuth: Bool
 
-        init(apiKey: String, model: String = "gpt-4o-mini", endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!, provider: AIProvider = .openai, chatgptAccountId: String? = nil) {
+        init(apiKey: String, model: String = "gpt-4o-mini", endpoint: URL = URL(string: "https://api.openai.com/v1/chat/completions")!, provider: AIProvider = .openai, chatgptAccountId: String? = nil, anthropicBearerAuth: Bool = false) {
             self.apiKey = apiKey
             self.model = model
             self.endpoint = endpoint
             self.provider = provider
             self.chatgptAccountId = chatgptAccountId
+            self.anthropicBearerAuth = anthropicBearerAuth
         }
     }
 
@@ -269,7 +271,11 @@ final class AIService: Sendable {
 
         var request = URLRequest(url: config.endpoint)
         request.httpMethod = "POST"
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        if config.anthropicBearerAuth {
+            request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
+        } else {
+            request.setValue(config.apiKey, forHTTPHeaderField: "x-api-key")
+        }
         request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
