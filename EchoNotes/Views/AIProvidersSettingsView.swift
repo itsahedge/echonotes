@@ -62,7 +62,7 @@ struct AIProvidersSettingsView: View {
         }
         .padding(16)
                 .background(isSelected(provider) ? Color.orange.opacity(0.1) : Color.gray.opacity(0.1))
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
     }
     
     private func isSelected(_ provider: AIProvider) -> Bool {

@@ -26,7 +26,7 @@ struct ActiveRecordingView: View {
                     .multilineTextAlignment(.center)
                     .padding()
                     .background(Color.red.opacity(0.1))
-                    .cornerRadius(8)
+                    .clipShape(.rect(cornerRadius: 8))
             }
         }
         .padding(20)

@@ -236,7 +236,7 @@ struct RecordingDetailView: View {
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.06))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 
     private func bulletItem(_ text: String) -> some View {
@@ -307,7 +307,7 @@ struct RecordingDetailView: View {
         }
         .padding(12)
         .background(Color.secondary.opacity(0.06))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 
     // MARK: - Summary Generation
