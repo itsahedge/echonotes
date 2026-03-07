@@ -96,7 +96,7 @@ struct SettingsView: View {
         }
         .padding(12)
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 
     // MARK: - AI Provider Section
@@ -228,7 +228,7 @@ struct SettingsView: View {
         }
         .padding(12)
         .background(Color.secondary.opacity(0.05))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 
     // MARK: - Custom Endpoint
@@ -290,7 +290,7 @@ struct SettingsView: View {
                         .foregroundStyle(result.success ? .green : .red)
                     Text(result.message)
                         .font(.callout)
-                        .foregroundColor(result.success ? .primary : .red)
+                        .foregroundStyle(result.success ? .primary : .red)
                 }
             }
         }

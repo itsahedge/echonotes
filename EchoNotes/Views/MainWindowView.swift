@@ -149,7 +149,7 @@ struct MainWindowView: View {
                     ? Color.secondary.opacity(0.15)
                     : Color.clear
             )
-            .cornerRadius(6)
+            .clipShape(.rect(cornerRadius: 6))
         }
         .buttonStyle(.plain)
     }

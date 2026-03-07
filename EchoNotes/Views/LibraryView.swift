@@ -47,7 +47,7 @@ struct LibraryView: View {
             }
             .padding(6)
             .background(Color.secondary.opacity(0.1))
-            .cornerRadius(6)
+            .clipShape(.rect(cornerRadius: 6))
 
             if library.filteredEntries.isEmpty {
                 Spacer()
@@ -114,7 +114,7 @@ private struct RecordingRow: View {
             }
             .padding(8)
             .background(Color.secondary.opacity(0.05))
-            .cornerRadius(6)
+            .clipShape(.rect(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .contextMenu {
