@@ -37,7 +37,37 @@ struct ActiveRecordingView: View {
 
     private var recordingView: some View {
         VStack(spacing: 20) {
-            Text(Transcript.formatTimestamp(recorder.duration))
+            // Show pause indicator and resume button
+            if recorder.isPaused {
+                HStack {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.yellow)
+                    VStack {
+                        Text("Recording Paused")
+                            .font(.headline)
+                        Text("Tap to resume")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button(action: {
+                        Task {
+                            await recorder.resume()
+                        }
+                    }) {
+                        Image(systemName: "play.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.green)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding()
+                .background(Color.yellow.opacity(0.1))
+                .cornerRadius(12)
+            }
+
+            Text(Transcript.formatTimestamp(recorder.duration + recorder.pauseDuration))
                 .font(.system(size: 52, weight: .light, design: .monospaced))
                 .foregroundStyle(.primary)
 

@@ -336,4 +336,14 @@ final class TranscriptionManager: ObservableObject {
         progress = 0
         summary = nil
     }
+
+    /// Pause live transcription — flush current chunks and stop accepting new audio
+    func pauseLiveTranscription() async {
+        await streamingTranscriber.pause()
+    }
+
+    /// Resume live transcription — continue processing from where we left off
+    func resumeLiveTranscription() async {
+        await streamingTranscriber.resume()
+    }
 }

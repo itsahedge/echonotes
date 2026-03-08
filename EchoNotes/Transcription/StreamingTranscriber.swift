@@ -21,6 +21,7 @@ final class StreamingTranscriber: ObservableObject {
     private let maxLiveSegments = 500
     @Published var isProcessing = false
     @Published var error: String?
+    @Published var isPaused = false
 
     /// Seconds of audio to accumulate before running inference.
     /// 5s gives fast feedback; Whisper base.en processes this in <1s on M-series.
@@ -54,6 +55,9 @@ final class StreamingTranscriber: ObservableObject {
     /// Thread-safe — can be called from any thread. Samples are appended
     /// in the exact order received, then drained on MainActor.
     nonisolated func feedSamples(_ samples: [Float]) {
+        // Skip processing if paused
+        if isPaused { return }
+
         sampleLock.lock()
         incomingSamples.append(contentsOf: samples)
         let count = incomingSamples.count
@@ -191,6 +195,18 @@ final class StreamingTranscriber: ObservableObject {
             flushedSegments.append(contentsOf: segments.prefix(overflow))
             segments.removeFirst(overflow)
         }
+    }
+
+    /// Pause live transcription — stop accepting new audio chunks
+    func pause() {
+        isPaused = true
+        logger.info("Live transcription paused")
+    }
+
+    /// Resume live transcription — continue accepting audio chunks
+    func resume() {
+        isPaused = false
+        logger.info("Live transcription resumed")
     }
 
     /// Resample 48kHz → 16kHz mono for Whisper using a fresh converter per call.
