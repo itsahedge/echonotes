@@ -75,7 +75,7 @@ struct ActiveRecordingView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(recentSegments.enumerated()), id: \.offset) { idx, segment in
+                            ForEach(tm.streamingTranscriber.segments, id: \.self) { segment in
                                 HStack(alignment: .top, spacing: 6) {
                                     if let speaker = segment.speaker {
                                         Text(speaker)
@@ -86,13 +86,12 @@ struct ActiveRecordingView: View {
                                         .font(.body)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
-                                .id(idx)
                             }
                         }
                     }
                     .onChange(of: tm.streamingTranscriber.segments.count) { _, newCount in
                         if newCount > 0 {
-                            proxy.scrollTo(min(recentSegments.count - 1, 49), anchor: .bottom)
+                            proxy.scrollTo(newCount - 1, anchor: .bottom)
                         }
                     }
                 }
