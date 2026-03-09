@@ -112,9 +112,13 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
             guard wasCapturing else { return }
             self.logger.info("System going to sleep — tearing down SCStream to prevent stale state")
             self._pendingResume.withLock { $0 = true }
-            // Synchronously nil out the stream to prevent delegate callbacks on a dead XPC connection
+            // Detach the stream to prevent delegate callbacks on a dead XPC connection.
+            // We can't await stopCapture() from a sync notification handler, but removing
+            // the output + nilling the reference prevents the crash path.
             if let stream = self.stream {
                 try? stream.removeStreamOutput(self, type: .audio)
+                // Fire-and-forget the async stop to release daemon-side resources
+                Task { try? await stream.stopCapture() }
             }
             self.stream = nil
         }
@@ -125,12 +129,20 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
             queue: .main
         ) { [weak self] _ in
             guard let self else { return }
-            guard self._pendingResume.withLock({ $0 }) else { return }
+            // Re-check pendingResume atomically — stopCapture() clears it if the user
+            // stopped recording while the Mac was asleep
+            let shouldResume = self._pendingResume.withLock { current -> Bool in
+                guard current else { return false }
+                current = false
+                return true
+            }
+            guard shouldResume else { return }
             self.logger.info("System woke up — re-creating SCStream")
-            self._pendingResume.withLock { $0 = false }
             Task {
                 // Brief delay to let ScreenCaptureKit daemon stabilize after wake
                 try? await Task.sleep(for: .seconds(1))
+                // Final check: stopCapture() may have run during the delay
+                guard self._isCapturing.withLock({ $0 }) else { return }
                 do {
                     // Temporarily mark as not capturing so startCapture guard passes
                     self._isCapturing.withLock { $0 = false }
