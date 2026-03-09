@@ -37,9 +37,30 @@ struct ActiveRecordingView: View {
 
     private var recordingView: some View {
         VStack(spacing: 20) {
+            // Pause banner
+            if recorder.isPaused {
+                HStack(spacing: 12) {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Recording Paused")
+                            .font(.headline)
+                        Text("Audio capture is suspended")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(Color.yellow.opacity(0.1))
+                .clipShape(.rect(cornerRadius: 12))
+            }
+
+            // Duration shows actual recording time (pause time is excluded)
             Text(Transcript.formatTimestamp(recorder.duration))
                 .font(.system(size: 52, weight: .light, design: .monospaced))
-                .foregroundStyle(.primary)
+                .foregroundStyle(recorder.isPaused ? .secondary : .primary)
 
             HStack(spacing: 24) {
                 LevelMeterView(label: "System", level: recorder.systemLevel)

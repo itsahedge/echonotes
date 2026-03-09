@@ -26,6 +26,9 @@ final class RecordingEngine: ObservableObject {
     @Published var systemLevel: Float = 0
     @Published var errorMessage: String?
     @Published var lastRecordingURL: URL?
+    @Published var isPaused: Bool = false
+    /// Total time spent paused across all pause/resume cycles in the current recording.
+    @Published var totalPauseDuration: TimeInterval = 0
     @Published var autoTranscribe: Bool = UserDefaults.standard.bool(forKey: "autoTranscribe") {
         didSet { UserDefaults.standard.set(autoTranscribe, forKey: "autoTranscribe") }
     }
@@ -59,6 +62,9 @@ final class RecordingEngine: ObservableObject {
     private var audioWriter: AudioFileWriter?
     private var durationTimer: Timer?
     private var recordingStartTime: Date?
+    private var pauseStartTime: Date?
+    /// Accumulated pause time from previous pause/resume cycles (not including current pause).
+    private var accumulatedPauseDuration: TimeInterval = 0
     private var lastSystemLevelUpdate: Date = .distantPast
     private var lastMicLevelUpdate: Date = .distantPast
 
@@ -220,11 +226,12 @@ final class RecordingEngine: ObservableObject {
             logger.info("Recording started: \(fileURL.lastPathComponent)")
             debugLog.info("Recording started: \(fileURL.lastPathComponent)", category: "Recording")
 
-            // Duration timer
+            // Duration timer — shows actual recording time (wall clock minus total pause time)
             durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let start = self.recordingStartTime else { return }
-                    self.duration = Date().timeIntervalSince(start)
+                    let elapsed = Date().timeIntervalSince(start)
+                    self.duration = elapsed - self.totalPauseDuration
                 }
             }
         } catch {
@@ -234,14 +241,93 @@ final class RecordingEngine: ObservableObject {
         }
     }
 
+    /// Pause recording — stops audio capture but keeps the file open for later resume.
+    func pause() async {
+        guard isRecording && !isPaused else { return }
+
+        logger.info("Pausing recording...")
+        isPaused = true
+        pauseStartTime = Date()
+
+        // Stop duration timer while paused (prevents timer drift during pause)
+        durationTimer?.invalidate()
+        durationTimer = nil
+
+        // Stop audio captures
+        await systemCapture.stopCapture()
+        micCapture.stopCapture()
+
+        // Reset level meters
+        systemLevel = 0
+        micLevel = 0
+
+        // Pause live transcription if enabled
+        if transcriptionMode == .live {
+            await transcriptionManager.pauseLiveTranscription()
+        }
+    }
+
+    /// Resume recording — restarts audio capture, accumulates pause duration.
+    func resume() async {
+        guard isRecording && isPaused else { return }
+
+        logger.info("Resuming recording...")
+
+        // Accumulate this pause cycle's duration
+        if let pauseStart = pauseStartTime {
+            let thisPause = Date().timeIntervalSince(pauseStart)
+            accumulatedPauseDuration += thisPause
+            totalPauseDuration = accumulatedPauseDuration
+        }
+        isPaused = false
+        pauseStartTime = nil
+
+        // Resume audio captures
+        // Note: onBuffer callbacks survive because they're set as properties on the
+        // capture objects, not on the SCStream/AVAudioEngine instances that get recreated.
+        do {
+            try await systemCapture.startCapture(sampleRate: AudioConfig.sampleRate)
+        } catch {
+            logger.error("Failed to resume system audio: \(error.localizedDescription)")
+            errorMessage = "Failed to resume system audio: \(error.localizedDescription)"
+            return
+        }
+
+        do {
+            try micCapture.startCapture(sampleRate: AudioConfig.sampleRate)
+        } catch {
+            logger.error("Failed to resume microphone: \(error.localizedDescription)")
+            errorMessage = "Failed to resume microphone: \(error.localizedDescription)"
+            await systemCapture.stopCapture()
+            return
+        }
+
+        // Restart duration timer
+        durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.recordingStartTime else { return }
+                let elapsed = Date().timeIntervalSince(start)
+                self.duration = elapsed - self.totalPauseDuration
+            }
+        }
+
+        // Resume live transcription if enabled
+        if transcriptionMode == .live {
+            await transcriptionManager.resumeLiveTranscription()
+        }
+    }
+
     func stopRecording() async {
         guard isRecording else { return }
 
         durationTimer?.invalidate()
         durationTimer = nil
 
-        await systemCapture.stopCapture()
-        micCapture.stopCapture()
+        // If currently paused, captures are already stopped — skip redundant stop calls
+        if !isPaused {
+            await systemCapture.stopCapture()
+            micCapture.stopCapture()
+        }
         audioWriter?.finalize()
 
         let url = audioWriter?.outputURL
@@ -249,7 +335,11 @@ final class RecordingEngine: ObservableObject {
         cleanup()
 
         isRecording = false
+        isPaused = false
         duration = 0
+        totalPauseDuration = 0
+        accumulatedPauseDuration = 0
+        pauseStartTime = nil
         micLevel = 0
         systemLevel = 0
 
