@@ -37,39 +37,30 @@ struct ActiveRecordingView: View {
 
     private var recordingView: some View {
         VStack(spacing: 20) {
-            // Show pause indicator and resume button
+            // Pause banner
             if recorder.isPaused {
-                HStack {
+                HStack(spacing: 12) {
                     Image(systemName: "pause.circle.fill")
-                        .font(.system(size: 40))
+                        .font(.system(size: 32))
                         .foregroundStyle(.yellow)
-                    VStack {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("Recording Paused")
                             .font(.headline)
-                        Text("Tap to resume")
+                        Text("Audio capture is suspended")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(action: {
-                        Task {
-                            await recorder.resume()
-                        }
-                    }) {
-                        Image(systemName: "play.circle.fill")
-                            .font(.title2)
-                            .foregroundStyle(.green)
-                    }
-                    .buttonStyle(.plain)
                 }
                 .padding()
                 .background(Color.yellow.opacity(0.1))
-                .cornerRadius(12)
+                .clipShape(.rect(cornerRadius: 12))
             }
 
-            Text(Transcript.formatTimestamp(recorder.duration + recorder.pauseDuration))
+            // Duration shows actual recording time (pause time is excluded)
+            Text(Transcript.formatTimestamp(recorder.duration))
                 .font(.system(size: 52, weight: .light, design: .monospaced))
-                .foregroundStyle(.primary)
+                .foregroundStyle(recorder.isPaused ? .secondary : .primary)
 
             HStack(spacing: 24) {
                 LevelMeterView(label: "System", level: recorder.systemLevel)

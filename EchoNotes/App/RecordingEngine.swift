@@ -27,7 +27,8 @@ final class RecordingEngine: ObservableObject {
     @Published var errorMessage: String?
     @Published var lastRecordingURL: URL?
     @Published var isPaused: Bool = false
-    @Published var pauseDuration: TimeInterval = 0
+    /// Total time spent paused across all pause/resume cycles in the current recording.
+    @Published var totalPauseDuration: TimeInterval = 0
     @Published var autoTranscribe: Bool = UserDefaults.standard.bool(forKey: "autoTranscribe") {
         didSet { UserDefaults.standard.set(autoTranscribe, forKey: "autoTranscribe") }
     }
@@ -60,9 +61,10 @@ final class RecordingEngine: ObservableObject {
     private let micCapture = MicrophoneCapture()
     private var audioWriter: AudioFileWriter?
     private var durationTimer: Timer?
-    private var pauseTimer: Timer?
     private var recordingStartTime: Date?
     private var pauseStartTime: Date?
+    /// Accumulated pause time from previous pause/resume cycles (not including current pause).
+    private var accumulatedPauseDuration: TimeInterval = 0
     private var lastSystemLevelUpdate: Date = .distantPast
     private var lastMicLevelUpdate: Date = .distantPast
 
@@ -224,11 +226,12 @@ final class RecordingEngine: ObservableObject {
             logger.info("Recording started: \(fileURL.lastPathComponent)")
             debugLog.info("Recording started: \(fileURL.lastPathComponent)", category: "Recording")
 
-            // Duration timer
+            // Duration timer — shows actual recording time (wall clock minus total pause time)
             durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
                 Task { @MainActor in
                     guard let self, let start = self.recordingStartTime else { return }
-                    self.duration = Date().timeIntervalSince(start)
+                    let elapsed = Date().timeIntervalSince(start)
+                    self.duration = elapsed - self.totalPauseDuration
                 }
             }
         } catch {
@@ -238,7 +241,7 @@ final class RecordingEngine: ObservableObject {
         }
     }
 
-    /// Pause recording - stops audio capture but keeps the file open
+    /// Pause recording — stops audio capture but keeps the file open for later resume.
     func pause() async {
         guard isRecording && !isPaused else { return }
 
@@ -246,37 +249,42 @@ final class RecordingEngine: ObservableObject {
         isPaused = true
         pauseStartTime = Date()
 
+        // Stop duration timer while paused (prevents timer drift during pause)
+        durationTimer?.invalidate()
+        durationTimer = nil
+
         // Stop audio captures
         await systemCapture.stopCapture()
         micCapture.stopCapture()
 
-        // Stop level meter updates
+        // Reset level meters
         systemLevel = 0
         micLevel = 0
 
-        // Start pause duration timer
-        pauseTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let start = self.pauseStartTime else { return }
-                self.pauseDuration = Date().timeIntervalSince(start)
-            }
-        }
-
-        // Stop live transcription if enabled
+        // Pause live transcription if enabled
         if transcriptionMode == .live {
             await transcriptionManager.pauseLiveTranscription()
         }
     }
 
-    /// Resume recording - resumes audio capture to the same file
+    /// Resume recording — restarts audio capture, accumulates pause duration.
     func resume() async {
         guard isRecording && isPaused else { return }
 
         logger.info("Resuming recording...")
+
+        // Accumulate this pause cycle's duration
+        if let pauseStart = pauseStartTime {
+            let thisPause = Date().timeIntervalSince(pauseStart)
+            accumulatedPauseDuration += thisPause
+            totalPauseDuration = accumulatedPauseDuration
+        }
         isPaused = false
         pauseStartTime = nil
 
         // Resume audio captures
+        // Note: onBuffer callbacks survive because they're set as properties on the
+        // capture objects, not on the SCStream/AVAudioEngine instances that get recreated.
         do {
             try await systemCapture.startCapture(sampleRate: AudioConfig.sampleRate)
         } catch {
@@ -294,9 +302,14 @@ final class RecordingEngine: ObservableObject {
             return
         }
 
-        // Clear pause timer
-        pauseTimer?.invalidate()
-        pauseTimer = nil
+        // Restart duration timer
+        durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let start = self.recordingStartTime else { return }
+                let elapsed = Date().timeIntervalSince(start)
+                self.duration = elapsed - self.totalPauseDuration
+            }
+        }
 
         // Resume live transcription if enabled
         if transcriptionMode == .live {
@@ -309,11 +322,12 @@ final class RecordingEngine: ObservableObject {
 
         durationTimer?.invalidate()
         durationTimer = nil
-        pauseTimer?.invalidate()
-        pauseTimer = nil
 
-        await systemCapture.stopCapture()
-        micCapture.stopCapture()
+        // If currently paused, captures are already stopped — skip redundant stop calls
+        if !isPaused {
+            await systemCapture.stopCapture()
+            micCapture.stopCapture()
+        }
         audioWriter?.finalize()
 
         let url = audioWriter?.outputURL
@@ -323,7 +337,9 @@ final class RecordingEngine: ObservableObject {
         isRecording = false
         isPaused = false
         duration = 0
-        pauseDuration = 0
+        totalPauseDuration = 0
+        accumulatedPauseDuration = 0
+        pauseStartTime = nil
         micLevel = 0
         systemLevel = 0
 

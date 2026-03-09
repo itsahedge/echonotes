@@ -22,6 +22,8 @@ final class StreamingTranscriber: ObservableObject {
     @Published var isProcessing = false
     @Published var error: String?
     @Published var isPaused = false
+    /// Thread-safe pause flag for nonisolated feedSamples (avoids data race on @Published isPaused).
+    private let pausedLock = OSAllocatedUnfairLock(initialState: false)
 
     /// Seconds of audio to accumulate before running inference.
     /// 5s gives fast feedback; Whisper base.en processes this in <1s on M-series.
@@ -55,8 +57,8 @@ final class StreamingTranscriber: ObservableObject {
     /// Thread-safe — can be called from any thread. Samples are appended
     /// in the exact order received, then drained on MainActor.
     nonisolated func feedSamples(_ samples: [Float]) {
-        // Skip processing if paused
-        if isPaused { return }
+        // Skip processing if paused (thread-safe check)
+        guard !pausedLock.withLock({ $0 }) else { return }
 
         sampleLock.lock()
         incomingSamples.append(contentsOf: samples)
@@ -200,12 +202,14 @@ final class StreamingTranscriber: ObservableObject {
     /// Pause live transcription — stop accepting new audio chunks
     func pause() {
         isPaused = true
+        pausedLock.withLock { $0 = true }
         logger.info("Live transcription paused")
     }
 
     /// Resume live transcription — continue accepting audio chunks
     func resume() {
         isPaused = false
+        pausedLock.withLock { $0 = false }
         logger.info("Live transcription resumed")
     }
 

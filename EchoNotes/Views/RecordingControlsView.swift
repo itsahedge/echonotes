@@ -23,9 +23,7 @@ struct RecordingControlsView: View {
             if recorder.isPaused {
                 // Resume button
                 Button(action: {
-                    Task {
-                        await recorder.resume()
-                    }
+                    Task { await recorder.resume() }
                 }) {
                     HStack {
                         Image(systemName: "play.fill")
@@ -39,9 +37,7 @@ struct RecordingControlsView: View {
             } else {
                 // Pause button
                 Button(action: {
-                    Task {
-                        await recorder.pause()
-                    }
+                    Task { await recorder.pause() }
                 }) {
                     HStack {
                         Image(systemName: "pause.fill")
@@ -52,23 +48,21 @@ struct RecordingControlsView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(.yellow)
-
-                // Stop button
-                Button(action: {
-                    Task {
-                        await recorder.stopRecording()
-                    }
-                }) {
-                    HStack {
-                        Image(systemName: "stop.fill")
-                        Text("Stop")
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.red)
             }
+
+            // Stop button — always visible during recording (paused or not)
+            Button(action: {
+                Task { await recorder.stopRecording() }
+            }) {
+                HStack {
+                    Image(systemName: "stop.fill")
+                    Text("Stop")
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
         }
     }
 
