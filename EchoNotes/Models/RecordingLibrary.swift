@@ -77,12 +77,24 @@ final class RecordingLibrary: ObservableObject {
         return docs.appendingPathComponent("EchoNotes", isDirectory: true)
     }
 
+    /// Known durations for recordings where AVFoundation may not yet report the correct value
+    /// (e.g. a file that was just finalized). Keyed by file URL.
+    private var knownDurations: [URL: TimeInterval] = [:]
+
+    /// Register a known duration for a recording URL. Used by RecordingEngine to provide
+    /// the accurate duration immediately after recording stops, before AVFoundation can
+    /// read it from the file header.
+    func setKnownDuration(_ duration: TimeInterval, for url: URL) {
+        knownDurations[url] = duration
+    }
+
     /// Scan the recordings directory for entries. File I/O runs on a background thread.
     func scan() {
         let directory = saveDirectory
+        let durations = knownDurations
         Task { [weak self] in
             let results = await Task.detached(priority: .userInitiated) {
-                await Self.scanDirectory(directory)
+                await Self.scanDirectory(directory, knownDurations: durations)
             }.value
             self?.entries = results
             self?.logger.info("Library scan: found \(results.count) recordings")
@@ -90,7 +102,7 @@ final class RecordingLibrary: ObservableObject {
     }
 
     /// Pure scanning logic — runs off the main thread.
-    nonisolated private static func scanDirectory(_ directory: URL) async -> [RecordingEntry] {
+    nonisolated private static func scanDirectory(_ directory: URL, knownDurations: [URL: TimeInterval] = [:]) async -> [RecordingEntry] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
             return []
@@ -101,7 +113,10 @@ final class RecordingLibrary: ObservableObject {
         var results: [RecordingEntry] = []
         for fileURL in m4aFiles {
             let date = (try? fileURL.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
-            let duration = await getAudioDuration(url: fileURL)
+            // Use known duration if available (just-recorded files where AVFoundation
+            // may not yet report the correct value from the file header)
+            let assetDuration = await getAudioDuration(url: fileURL)
+            let duration = (assetDuration > 0) ? assetDuration : (knownDurations[fileURL] ?? 0)
             let txtURL = fileURL.deletingPathExtension().appendingPathExtension("txt")
             let jsonURL = fileURL.deletingPathExtension().appendingPathExtension("json")
             let hasTranscript = fm.fileExists(atPath: txtURL.path) || fm.fileExists(atPath: jsonURL.path)

@@ -234,6 +234,10 @@ final class RecordingEngine: ObservableObject {
         }
     }
 
+    /// Duration of the last completed recording (captured before reset).
+    /// Used by the library to display correct duration before AVFoundation can read it from the file.
+    @Published var lastRecordedDuration: TimeInterval = 0
+
     func stopRecording() async {
         guard isRecording else { return }
 
@@ -248,6 +252,7 @@ final class RecordingEngine: ObservableObject {
         let recordedDuration = duration  // Capture before reset
         cleanup()
 
+        lastRecordedDuration = recordedDuration
         isRecording = false
         duration = 0
         micLevel = 0

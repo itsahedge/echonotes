@@ -64,6 +64,11 @@ struct MainWindowView: View {
                     selectedEntryID = url
                 }
             } else {
+                // Register the known duration so the library can display it immediately
+                // (AVFoundation may not report the correct duration from a just-finalized file)
+                if let url = recorder.lastRecordingURL, recorder.lastRecordedDuration > 0 {
+                    library.setKnownDuration(recorder.lastRecordedDuration, for: url)
+                }
                 // Re-scan after recording stops so duration/metadata updates
                 library.scan()
             }
