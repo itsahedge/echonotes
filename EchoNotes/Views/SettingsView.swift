@@ -290,7 +290,7 @@ struct SettingsView: View {
                         .foregroundStyle(result.success ? .green : .red)
                     Text(result.message)
                         .font(.callout)
-                        .foregroundColor(result.success ? .primary : .red)
+                        .foregroundStyle(result.success ? .primary : Color.red)
                 }
             }
         }
