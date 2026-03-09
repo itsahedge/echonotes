@@ -1,5 +1,6 @@
 import ScreenCaptureKit
 import AVFoundation
+import AppKit
 import CoreMedia
 import os
 
@@ -23,11 +24,17 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
 
     private var stream: SCStream?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
+    private let _pendingResume = OSAllocatedUnfairLock(initialState: false)
     private let logger = Logger(subsystem: "com.echonotes", category: "SystemAudioCapture")
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var capturedSampleRate: Double = AudioConfig.sampleRate
 
     /// Start capturing system audio at the given sample rate (mono Float32).
     func startCapture(sampleRate: Double = AudioConfig.sampleRate) async throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
+        capturedSampleRate = sampleRate
+        installSleepWakeObservers()
 
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
@@ -78,10 +85,74 @@ final class SystemAudioCapture: NSObject, @unchecked Sendable {
     }
 
     func stopCapture() async {
-        guard _isCapturing.withLock({ $0 }), let stream else { return }
-        try? await stream.stopCapture()
-        self.stream = nil
+        guard _isCapturing.withLock({ $0 }) else { return }
+        removeSleepWakeObservers()
+        if let stream {
+            try? await stream.stopCapture()
+            self.stream = nil
+        }
         _isCapturing.withLock { $0 = false }
+        _pendingResume.withLock { $0 = false }
+    }
+
+    // MARK: - Sleep/Wake Handling
+
+    /// Tear down the SCStream before sleep to prevent stale XPC connections.
+    /// On wake, re-create the stream if we were capturing.
+    private func installSleepWakeObservers() {
+        let workspace = NSWorkspace.shared.notificationCenter
+
+        sleepObserver = workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let wasCapturing = self._isCapturing.withLock { $0 }
+            guard wasCapturing else { return }
+            self.logger.info("System going to sleep — tearing down SCStream to prevent stale state")
+            self._pendingResume.withLock { $0 = true }
+            // Synchronously nil out the stream to prevent delegate callbacks on a dead XPC connection
+            if let stream = self.stream {
+                try? stream.removeStreamOutput(self, type: .audio)
+            }
+            self.stream = nil
+        }
+
+        wakeObserver = workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            guard self._pendingResume.withLock({ $0 }) else { return }
+            self.logger.info("System woke up — re-creating SCStream")
+            self._pendingResume.withLock { $0 = false }
+            Task {
+                // Brief delay to let ScreenCaptureKit daemon stabilize after wake
+                try? await Task.sleep(for: .seconds(1))
+                do {
+                    // Temporarily mark as not capturing so startCapture guard passes
+                    self._isCapturing.withLock { $0 = false }
+                    try await self.startCapture(sampleRate: self.capturedSampleRate)
+                } catch {
+                    self.logger.error("Failed to resume system audio after wake: \(error.localizedDescription)")
+                    self.onError?(error)
+                }
+            }
+        }
+    }
+
+    private func removeSleepWakeObservers() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        if let observer = sleepObserver {
+            workspace.removeObserver(observer)
+            sleepObserver = nil
+        }
+        if let observer = wakeObserver {
+            workspace.removeObserver(observer)
+            wakeObserver = nil
+        }
     }
 }
 
@@ -91,6 +162,8 @@ extension SystemAudioCapture: SCStreamOutput {
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         // Only process audio buffers (we only registered for .audio type)
         guard type == .audio, sampleBuffer.isValid else { return }
+        // Guard against callbacks from a stream we've already torn down (e.g. post-sleep)
+        guard self.stream === stream else { return }
         guard let dataBuffer = sampleBuffer.dataBuffer else { return }
 
         let length = dataBuffer.dataLength
@@ -112,6 +185,12 @@ extension SystemAudioCapture: SCStreamOutput {
 extension SystemAudioCapture: SCStreamDelegate {
     func stream(_ stream: SCStream, didStopWithError error: Error) {
         logger.error("System audio stream stopped with error: \(error.localizedDescription)")
+        // Guard against delegate calls on a stream we've already torn down
+        guard self.stream === stream else {
+            logger.info("Ignoring didStopWithError for a detached stream (likely post-sleep cleanup)")
+            return
+        }
+        self.stream = nil
         _isCapturing.withLock { $0 = false }
         onError?(error)
     }
