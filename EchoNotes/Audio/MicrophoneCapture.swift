@@ -1,4 +1,5 @@
 @preconcurrency import AVFoundation
+import AppKit
 import os
 
 /// Captures microphone audio using AVAudioEngine.
@@ -20,19 +21,25 @@ final class MicrophoneCapture: @unchecked Sendable {
         _hasWarning.withLock { $0 = false }
     }
 
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
     private let lock = NSLock()
     private var converter: AVAudioConverter?
     private var targetFormat: AVAudioFormat?
     private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
     private let _hasWarning = OSAllocatedUnfairLock(initialState: false)
     private let _isDisconnected = OSAllocatedUnfairLock(initialState: false)
+    private let _pendingResume = OSAllocatedUnfairLock(initialState: false)
     private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
     private var configObserver: NSObjectProtocol?
     private var silenceTimer: DispatchSourceTimer?
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
+    private var capturedSampleRate: Double = AudioConfig.sampleRate
 
     func startCapture(sampleRate: Double = AudioConfig.sampleRate) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
+        capturedSampleRate = sampleRate
+        installSleepWakeObservers()
 
         let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
 
@@ -85,6 +92,8 @@ final class MicrophoneCapture: @unchecked Sendable {
         guard _isCapturing.withLock({ $0 }) else { return }
 
         _isCapturing.withLock { $0 = false }
+        _pendingResume.withLock { $0 = false }
+        removeSleepWakeObservers()
 
         if let observer = configObserver {
             NotificationCenter.default.removeObserver(observer)
@@ -223,6 +232,88 @@ final class MicrophoneCapture: @unchecked Sendable {
         onWarning?("Microphone unavailable - recording will continue with system audio only")
 
         startSilenceFeed()
+    }
+
+    // MARK: - Sleep/Wake Handling
+
+    /// Tear down the AVAudioEngine before sleep to prevent stale hardware references.
+    /// On wake, create a fresh engine and restart capture if we were active.
+    private func installSleepWakeObservers() {
+        guard sleepObserver == nil else { return }
+        let workspace = NSWorkspace.shared.notificationCenter
+
+        sleepObserver = workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let wasCapturing = self._isCapturing.withLock { $0 }
+            guard wasCapturing else { return }
+            self.logger.info("System going to sleep — tearing down AVAudioEngine")
+            self._pendingResume.withLock { $0 = true }
+            self._isCapturing.withLock { $0 = false }
+
+            // Remove config observer to prevent spurious change notifications during sleep
+            if let observer = self.configObserver {
+                NotificationCenter.default.removeObserver(observer)
+                self.configObserver = nil
+            }
+
+            // Stop silence timer if in disconnected mode
+            if self._isDisconnected.withLock({ $0 }) {
+                self.silenceTimer?.cancel()
+                self.silenceTimer = nil
+            }
+
+            // Tear down the engine to prevent stale audio hardware references
+            if self.engine.isRunning {
+                self.engine.inputNode.removeTap(onBus: 0)
+                self.engine.stop()
+            }
+
+            self.lock.lock()
+            self.converter = nil
+            self.lock.unlock()
+        }
+
+        wakeObserver = workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            guard self._pendingResume.withLock({ $0 }) else { return }
+            self.logger.info("System woke up — recreating AVAudioEngine")
+            self._pendingResume.withLock { $0 = false }
+            self._isDisconnected.withLock { $0 = false }
+
+            // Replace the engine with a fresh instance to avoid stale hardware state
+            self.engine = AVAudioEngine()
+
+            // Brief delay for the audio subsystem to stabilize after wake
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self else { return }
+                do {
+                    try self.startCapture(sampleRate: self.capturedSampleRate)
+                } catch {
+                    self.logger.error("Failed to resume microphone after wake: \(error.localizedDescription)")
+                    self.onError?(error)
+                }
+            }
+        }
+    }
+
+    private func removeSleepWakeObservers() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        if let observer = sleepObserver {
+            workspace.removeObserver(observer)
+            sleepObserver = nil
+        }
+        if let observer = wakeObserver {
+            workspace.removeObserver(observer)
+            wakeObserver = nil
+        }
     }
 
     // MARK: - Silence Feed
