@@ -67,6 +67,8 @@ final class RecordingEngine: ObservableObject {
     private var accumulatedPauseDuration: TimeInterval = 0
     private var lastSystemLevelUpdate: Date = .distantPast
     private var lastMicLevelUpdate: Date = .distantPast
+    private var sleepObserver: NSObjectProtocol?
+    private var wakeObserver: NSObjectProtocol?
 
     /// Reusable DateFormatter for recording filenames. Static to avoid repeated allocation.
     private static let recordingTimestampFormatter: DateFormatter = {
@@ -223,6 +225,7 @@ final class RecordingEngine: ObservableObject {
             lastRecordingURL = fileURL
             recordingStartTime = Date()
             isRecording = true
+            installSleepWakeObservers()
             logger.info("Recording started: \(fileURL.lastPathComponent)")
             debugLog.info("Recording started: \(fileURL.lastPathComponent)", category: "Recording")
 
@@ -320,6 +323,7 @@ final class RecordingEngine: ObservableObject {
     func stopRecording() async {
         guard isRecording else { return }
 
+        removeSleepWakeObservers()
         durationTimer?.invalidate()
         durationTimer = nil
 
@@ -358,6 +362,55 @@ final class RecordingEngine: ObservableObject {
                     Task { await transcriptionManager.transcribe(audioURL: url) }
                 }
             }
+        }
+    }
+
+    // MARK: - Sleep/Wake Handling
+
+    /// Install observers to auto-pause recording when the system sleeps.
+    /// Prevents audio subsystems from entering a stale state during sleep.
+    private func installSleepWakeObservers() {
+        guard sleepObserver == nil else { return }
+        let workspace = NSWorkspace.shared.notificationCenter
+
+        sleepObserver = workspace.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.isRecording, !self.isPaused else { return }
+                self.logger.info("System going to sleep — auto-pausing recording")
+                await self.pause()
+                self.errorMessage = "Recording paused — system went to sleep. Tap Resume to continue."
+            }
+        }
+
+        wakeObserver = workspace.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                guard self.isRecording, self.isPaused else { return }
+                // Don't auto-resume; let the user decide when to continue.
+                // The pause message from sleep handler is already visible.
+                self.logger.info("System woke up — recording remains paused, waiting for user to resume")
+            }
+        }
+    }
+
+    private func removeSleepWakeObservers() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        if let observer = sleepObserver {
+            workspace.removeObserver(observer)
+            sleepObserver = nil
+        }
+        if let observer = wakeObserver {
+            workspace.removeObserver(observer)
+            wakeObserver = nil
         }
     }
 
