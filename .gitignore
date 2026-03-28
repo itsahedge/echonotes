@@ -9,3 +9,7 @@ DerivedData/
 *.wav
 AUDIO-ONLY-UPDATE-SUMMARY.md
 *.app
+.opencode/
+.superset/
+~/
+excalidraw.log
