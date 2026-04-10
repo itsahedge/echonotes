@@ -191,13 +191,17 @@ final class RecordingEngine: ObservableObject {
                 throw error
             }
 
+            // Capture references for use in audio callbacks. These callbacks fire on
+            // background threads (ScreenCaptureKit / AVAudioEngine). Accessing them
+            // through `self` would hit the @MainActor executor check and crash.
+            // Both types use internal locking and are safe to call from any thread.
+            let writerRef = writer
+            let transcriberRef = isLive ? transcriptionManager.streamingTranscriber : nil
+
             // Now that both captures are running, set up buffer callbacks
             systemCapture.onBuffer = { [weak self] buffer in
-                self?.audioWriter?.writeSystemBuffer(buffer)
-                // Feed system audio to streaming transcriber for live mode
-                if isLive {
-                    self?.transcriptionManager.streamingTranscriber.feedSamples(buffer.samples)
-                }
+                writerRef.writeSystemBuffer(buffer)
+                transcriberRef?.feedSamples(buffer.samples)
                 // Throttle level meter updates to ~15fps (66ms minimum interval)
                 Task { @MainActor in
                     guard let self else { return }
@@ -210,7 +214,7 @@ final class RecordingEngine: ObservableObject {
             }
 
             micCapture.onBuffer = { [weak self] buffer in
-                self?.audioWriter?.writeMicBuffer(buffer)
+                writerRef.writeMicBuffer(buffer)
                 // Throttle level meter updates to ~15fps (66ms minimum interval)
                 Task { @MainActor in
                     guard let self else { return }
