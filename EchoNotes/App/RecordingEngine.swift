@@ -336,14 +336,6 @@ final class RecordingEngine: ObservableObject {
             await systemCapture.stopCapture()
             micCapture.stopCapture()
         }
-
-        // Release buffer callbacks before finalizing the writer. The callbacks
-        // capture a strong reference to the AudioFileWriter; clearing them lets
-        // the writer deallocate after finalize, closing the underlying AVAudioFile
-        // so the recording is readable for transcription.
-        systemCapture.onBuffer = nil
-        micCapture.onBuffer = nil
-
         audioWriter?.finalize()
 
         let url = audioWriter?.outputURL
