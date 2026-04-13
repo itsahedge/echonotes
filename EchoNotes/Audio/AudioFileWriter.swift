@@ -28,7 +28,7 @@ final class AudioFileWriter: @unchecked Sendable {
     /// Called on write errors (e.g. disk full, buffer overflow). After an error, no further writes are accepted.
     let onError: (@Sendable (Error) -> Void)?
 
-    private let file: AVAudioFile
+    private var file: AVAudioFile?
     private let sampleRate: Double
     private let format: AVAudioFormat
     private let lock = NSLock()
@@ -138,7 +138,7 @@ final class AudioFileWriter: @unchecked Sendable {
         }
 
         do {
-            try file.write(from: pcmBuffer)
+            try file?.write(from: pcmBuffer)
         } catch {
             writeError = error
             onError?(error)
@@ -147,16 +147,18 @@ final class AudioFileWriter: @unchecked Sendable {
 
     /// Flush any remaining samples and close the file.
     ///
-    /// **Known limitation:** There is a race window where capture callbacks may still be
-    /// in-flight when finalize is called (after stopCapture but before callbacks complete).
-    /// Samples arriving during this window may be dropped. A proper fix would require
-    /// synchronization at the capture layer to ensure all callbacks have finished before
-    /// finalize is invoked.
+    /// Explicitly nils the AVAudioFile to close the file handle. This is
+    /// required because audio callbacks may hold a strong reference to the
+    /// writer (to avoid @MainActor isolation violations), preventing dealloc.
     func finalize() {
         // Wait for all in-flight write callbacks to complete before finalizing.
         inflightGroup.wait()
         lock.lock()
-        guard writeError == nil else { lock.unlock(); return }
+        defer { lock.unlock() }
+        guard writeError == nil else {
+            file = nil
+            return
+        }
         // Pad the shorter stream with silence
         let sysRemaining = systemSamples.count - systemOffset
         let micRemaining = micSamples.count - micOffset
@@ -166,7 +168,8 @@ final class AudioFileWriter: @unchecked Sendable {
             while (micSamples.count - micOffset) < maxCount { micSamples.append(0) }
             flushIfReady()
         }
-        lock.unlock()
+        // Close the file handle so transcription can read the file
+        file = nil
     }
 }
 
