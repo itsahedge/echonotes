@@ -104,9 +104,11 @@ final class TranscriptionManager: ObservableObject {
 
     init() {
         // Forward OAuthManager changes to trigger SwiftUI updates
-        oauthCancellable = oauthManager.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
+        oauthCancellable = oauthManager.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
     }
 
     /// Whether the current provider is configured and ready to use.
@@ -339,11 +341,11 @@ final class TranscriptionManager: ObservableObject {
 
     /// Pause live transcription — flush current chunks and stop accepting new audio
     func pauseLiveTranscription() async {
-        await streamingTranscriber.pause()
+        streamingTranscriber.pause()
     }
 
     /// Resume live transcription — continue processing from where we left off
     func resumeLiveTranscription() async {
-        await streamingTranscriber.resume()
+        streamingTranscriber.resume()
     }
 }

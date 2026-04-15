@@ -63,6 +63,8 @@ final class RecordingLibrary: ObservableObject {
     private let logger = Logger(subsystem: "com.echonotes", category: "RecordingLibrary")
     @Published var entries: [RecordingEntry] = []
     @Published var searchQuery: String = ""
+    private var scanTask: Task<Void, Never>?
+    private var scanGeneration = 0
 
     var filteredEntries: [RecordingEntry] {
         guard !searchQuery.isEmpty else { return entries }
@@ -79,18 +81,41 @@ final class RecordingLibrary: ObservableObject {
 
     /// Scan the recordings directory for entries. File I/O runs on a background thread.
     func scan() {
+        requestRefresh()
+    }
+
+    func requestRefresh() {
         let directory = saveDirectory
-        Task { [weak self] in
-            let results = await Task.detached(priority: .userInitiated) {
-                await Self.scanDirectory(directory)
-            }.value
-            self?.entries = results
-            self?.logger.info("Library scan: found \(results.count) recordings")
+        scanGeneration += 1
+        let generation = scanGeneration
+
+        scanTask?.cancel()
+        scanTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+            } catch {
+                return
+            }
+
+            let results = await withTaskGroup(of: [RecordingEntry].self) { group in
+                group.addTask(priority: .userInitiated) {
+                    await Self.scanDirectory(directory)
+                }
+                return await group.next() ?? []
+            }
+
+            guard !Task.isCancelled else { return }
+            guard let self, generation == self.scanGeneration else { return }
+
+            self.entries = results
+            self.logger.info("Library scan: found \(results.count) recordings")
         }
     }
 
     /// Pure scanning logic — runs off the main thread.
     nonisolated private static func scanDirectory(_ directory: URL) async -> [RecordingEntry] {
+        guard !Task.isCancelled else { return [] }
+
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey]) else {
             return []
@@ -100,6 +125,8 @@ final class RecordingLibrary: ObservableObject {
 
         var results: [RecordingEntry] = []
         for fileURL in m4aFiles {
+            guard !Task.isCancelled else { return results }
+
             let date = (try? fileURL.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? Date.distantPast
             let duration = await getAudioDuration(url: fileURL)
             let txtURL = fileURL.deletingPathExtension().appendingPathExtension("txt")

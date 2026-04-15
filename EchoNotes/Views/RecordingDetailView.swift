@@ -71,46 +71,11 @@ struct RecordingDetailView: View {
             .padding(20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                // Context menu actions
-                Menu {
-                    if let transcript {
-                        Button(action: {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
-                        }) {
-                            Label("Copy Transcript", systemImage: "doc.on.doc")
-                        }
-                    }
-                    if let summary {
-                        Button(action: {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(summary.toMarkdown(), forType: .string)
-                        }) {
-                            Label("Copy Summary", systemImage: "doc.on.doc")
-                        }
-                    }
-                    Divider()
-                    Button(action: {
-                        NSWorkspace.shared.selectFile(entry.url.path, inFileViewerRootedAtPath: entry.url.deletingLastPathComponent().path)
-                    }) {
-                        Label("Show in Finder", systemImage: "folder")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-        .onAppear {
-            transcript = entry.loadTranscript()
-            if let existing = existingSummary {
-                summary = existing
-            }
+        .task(id: entry.id) {
+            loadEntryState()
         }
         .onChange(of: tm.isTranscribing) { _, isTranscribing in
             if !isTranscribing {
-                // Reload transcript after transcription completes
                 transcript = entry.loadTranscript()
             }
         }
@@ -355,5 +320,12 @@ struct RecordingDetailView: View {
             }
             isSummarizing = false
         }
+    }
+
+    private func loadEntryState() {
+        transcript = entry.loadTranscript()
+        summary = existingSummary
+        summaryError = nil
+        showTranscript = false
     }
 }

@@ -418,9 +418,11 @@ final class AIService: Sendable {
         // Manual fallback: parse JSON dict and extract fields flexibly
         if let dict = try? JSONSerialization.jsonObject(with: summaryData) as? [String: Any] {
             let summary = (dict["summary"] as? String) ?? ""
-            let actionItems = (dict["actionItems"] ?? dict["action_items"]) as? [String] ?? []
-            let keyDecisions = (dict["keyDecisions"] ?? dict["key_decisions"]) as? [String] ?? []
-            let openQuestions = (dict["openQuestions"] ?? dict["open_questions"]) as? [String] ?? []
+            guard let actionItems = (dict["actionItems"] ?? dict["action_items"]) as? [String],
+                  let keyDecisions = (dict["keyDecisions"] ?? dict["key_decisions"]) as? [String],
+                  let openQuestions = (dict["openQuestions"] ?? dict["open_questions"]) as? [String] else {
+                throw AIError.invalidResponse
+            }
 
             if !summary.isEmpty {
                 return MeetingSummary(summary: summary, actionItems: actionItems, keyDecisions: keyDecisions, openQuestions: openQuestions)
