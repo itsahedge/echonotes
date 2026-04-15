@@ -29,13 +29,20 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    oauthSection
+                    if tm.selectedProvider == .openai {
+                        oauthSection
+                    } else if tm.selectedProvider == .anthropic {
+                        anthropicSubscriptionSection
+                    }
                     aiProviderSection
                 }
             }
         }
         .onAppear {
-            apiKeyInput = tm.openaiAPIKey
+            apiKeyInput = currentAPIKey
+        }
+        .onChange(of: tm.selectedProvider) { _, _ in
+            apiKeyInput = currentAPIKey
         }
     }
 
@@ -99,6 +106,105 @@ struct SettingsView: View {
         .cornerRadius(8)
     }
 
+    // MARK: - Per-Provider API Key Helpers
+
+    private var currentAPIKey: String {
+        switch tm.selectedProvider {
+        case .openai: return tm.openaiAPIKey
+        case .anthropic: return tm.anthropicAPIKey
+        case .google: return tm.googleAPIKey
+        default: return ""
+        }
+    }
+
+    private func saveAPIKey(_ key: String) {
+        switch tm.selectedProvider {
+        case .openai: tm.openaiAPIKey = key
+        case .anthropic: tm.anthropicAPIKey = key
+        case .google: tm.googleAPIKey = key
+        default: break
+        }
+    }
+
+    // MARK: - Anthropic Subscription Section
+
+    @State private var anthropicTokenInput: String = ""
+
+    private var anthropicSubscriptionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Claude Subscription Auth", systemImage: "person.crop.circle")
+                .font(.subheadline.bold())
+
+            Text("Use your Claude Max/Pro subscription instead of an API key. Requires the Claude Code CLI.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            if tm.isAnthropicSubscriptionAuthenticated {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                    Text("Using your Claude subscription for Anthropic API access")
+                        .font(.callout.bold())
+                    Spacer()
+                    Button(action: { tm.anthropicSetupToken = "" }) {
+                        Text("Sign Out")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("1. Run this command in Terminal:")
+                        .font(.callout)
+                    HStack(spacing: 6) {
+                        Text("`claude setup-token`")
+                            .font(.system(.callout, design: .monospaced))
+                            .foregroundStyle(.primary)
+                        Button(action: {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString("claude setup-token", forType: .string)
+                        }) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.caption)
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("Copy command")
+                    }
+                    Text("2. Paste the token below:")
+                        .font(.callout)
+                    SecureField("Paste setup token...", text: $anthropicTokenInput)
+                        .textFieldStyle(.roundedBorder)
+                    Button(action: {
+                        let trimmed = anthropicTokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            tm.anthropicSetupToken = trimmed
+                            anthropicTokenInput = ""
+                        }
+                    }) {
+                        Text("Save Token")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(anthropicTokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.yellow)
+                    .font(.caption)
+                Text("Anthropic may restrict subscription usage outside Claude Code. Use at your own risk.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.05))
+        .cornerRadius(8)
+    }
+
     // MARK: - AI Provider Section
 
     private var aiProviderSection: some View {
@@ -112,6 +218,15 @@ struct SettingsView: View {
                         .font(.callout)
                         .foregroundStyle(.green)
                     Text("Using your ChatGPT account for OpenAI API access")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else if tm.isAnthropicSubscriptionAuthenticated && tm.selectedProvider == .anthropic {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.green)
+                    Text("Using your Claude subscription for Anthropic API access")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -157,8 +272,10 @@ struct SettingsView: View {
                 }
             }
 
-            // API Key (if required and not using OAuth)
-            if tm.selectedProvider.requiresAPIKey && !(tm.oauthManager.isAuthenticated && tm.selectedProvider == .openai) {
+            // API Key (if required and not using OAuth or subscription auth)
+            if tm.selectedProvider.requiresAPIKey
+                && !(tm.oauthManager.isAuthenticated && tm.selectedProvider == .openai)
+                && !(tm.isAnthropicSubscriptionAuthenticated && tm.selectedProvider == .anthropic) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("API Key")
                         .font(.callout.bold())
@@ -183,7 +300,7 @@ struct SettingsView: View {
 
                     HStack(spacing: 8) {
                         Button(action: {
-                            tm.openaiAPIKey = apiKeyInput
+                            saveAPIKey(apiKeyInput)
                             saved = true
                             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { saved = false }
                         }) {
@@ -191,11 +308,11 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(apiKeyInput == tm.openaiAPIKey)
+                        .disabled(apiKeyInput == currentAPIKey)
 
-                        if !tm.openaiAPIKey.isEmpty {
+                        if !currentAPIKey.isEmpty {
                             Button(action: {
-                                tm.openaiAPIKey = ""
+                                saveAPIKey("")
                                 apiKeyInput = ""
                             }) {
                                 Text("Remove Key")
