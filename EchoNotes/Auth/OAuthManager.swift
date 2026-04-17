@@ -10,15 +10,15 @@ final class OAuthManager: ObservableObject {
     private let logger = Logger(subsystem: "com.echonotes", category: "OAuth")
 
     // OpenAI OAuth constants (same as Codex CLI)
-    static let clientId = "app_EMoamEEZ73f0CkXaXp7hrann"
-    static let issuer = "https://auth.openai.com"
-    static let authorizeURL = "\(issuer)/oauth/authorize"
-    static let tokenURL = "\(issuer)/oauth/token"
-    static let scopes = "openid profile email offline_access"
+    nonisolated static let clientId = "app_EMoamEEZ73f0CkXaXp7hrann"
+    nonisolated static let issuer = "https://auth.openai.com"
+    nonisolated static let authorizeURL = "\(issuer)/oauth/authorize"
+    nonisolated static let tokenURL = "\(issuer)/oauth/token"
+    nonisolated static let scopes = "openid profile email offline_access"
 
     // Local callback server port — must match Codex CLI default (1455)
     // OpenAI likely has this redirect URI registered for the client ID
-    private static let callbackPort: UInt16 = 1455
+    nonisolated private static let callbackPort: UInt16 = 1455
 
     @Published var isAuthenticating = false
     @Published var isAuthenticated = false

@@ -37,20 +37,14 @@ final class StreamingTranscriber: ObservableObject {
     /// Lock-protected incoming sample buffer. Written from audio callbacks,
     /// drained on MainActor. The lock guarantees FIFO ordering regardless
     /// of which thread the audio callback fires on.
-    private nonisolated(unsafe) let sampleLock = NSLock()
+    private nonisolated let sampleLock = NSLock()
     private nonisolated(unsafe) var incomingSamples: [Float] = []
 
-    /// Reusable audio converter (48kHz → 16kHz). Created once in prepare()
-    /// to avoid repeated allocation per chunk. Only read from nonisolated
-    /// resample() after being set on MainActor — safe because prepare()
-    /// is always called before any audio flows.
-    private nonisolated(unsafe) var resampler: AVAudioConverter?
-    private nonisolated(unsafe) let srcFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
-    private nonisolated(unsafe) let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+    private nonisolated let srcFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+    private nonisolated let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
 
     func prepare(engine: WhisperEngine) {
         self.whisperEngine = engine
-        self.resampler = AVAudioConverter(from: srcFormat, to: dstFormat)
     }
 
     /// Feed system audio samples from the recording callback.
@@ -231,11 +225,22 @@ final class StreamingTranscriber: ObservableObject {
         let outFrames = AVAudioFrameCount(Double(samples.count) * dstFormat.sampleRate / srcFormat.sampleRate) + 256
         let outBuf = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: outFrames)!
 
-        var fed = false
+        let didProvideInput = OSAllocatedUnfairLock(initialState: false)
         var err: NSError?
         converter.convert(to: outBuf, error: &err) { _, status in
-            if !fed { fed = true; status.pointee = .haveData; return inBuf }
-            status.pointee = .noDataNow; return nil
+            let shouldProvideInput = didProvideInput.withLock { hasProvidedInput in
+                guard !hasProvidedInput else { return false }
+                hasProvidedInput = true
+                return true
+            }
+
+            if shouldProvideInput {
+                status.pointee = .haveData
+                return inBuf
+            }
+
+            status.pointee = .noDataNow
+            return nil
         }
         if let err { throw err }
 

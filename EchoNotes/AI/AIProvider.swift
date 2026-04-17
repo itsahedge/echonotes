@@ -61,7 +61,7 @@ enum AIProvider: String, CaseIterable, Codable, Sendable, Identifiable {
         case .anthropic: return ["claude-sonnet-4-5", "claude-haiku-3-5"]
         case .google: return ["gemini-2.0-flash", "gemini-2.5-pro"]
         case .ollama: return ["llama3.2", "llama3.1", "mistral", "gemma2"]
-        case .custom: return []
+        case .custom: return [defaultModel]
         }
     }
 
