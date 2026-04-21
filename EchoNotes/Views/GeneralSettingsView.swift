@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct GeneralSettingsView: View {
-    @ObservedObject var tm: TranscriptionManager
-    @ObservedObject var recorder: RecordingEngine
+    @Bindable var tm: TranscriptionManager
+    @Bindable var recorder: RecordingEngine
+
     
     var body: some View {
         ScrollView {

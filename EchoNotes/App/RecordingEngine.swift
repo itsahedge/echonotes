@@ -17,28 +17,29 @@ import os
 /// while engine state changes are published to UI observers, and transcription operations
 /// use structured concurrency with throws.
 @MainActor
-final class RecordingEngine: ObservableObject {
-    private let logger = Logger(subsystem: "com.echonotes", category: "RecordingEngine")
-    private var debugLog: DebugLogger { DebugLogger.shared }
-    @Published var isRecording = false
-    @Published var duration: TimeInterval = 0
-    @Published var micLevel: Float = 0
-    @Published var systemLevel: Float = 0
-    @Published var errorMessage: String?
-    @Published var lastRecordingURL: URL?
-    @Published var isPaused: Bool = false
+@Observable
+final class RecordingEngine {
+    @ObservationIgnored private let logger = Logger(subsystem: "com.echonotes", category: "RecordingEngine")
+    @ObservationIgnored private var debugLog: DebugLogger { DebugLogger.shared }
+    var isRecording = false
+    var duration: TimeInterval = 0
+    var micLevel: Float = 0
+    var systemLevel: Float = 0
+    var errorMessage: String?
+    var lastRecordingURL: URL?
+    var isPaused: Bool = false
     /// Total time spent paused across all pause/resume cycles in the current recording.
-    @Published var totalPauseDuration: TimeInterval = 0
-    @Published var autoTranscribe: Bool = UserDefaults.standard.bool(forKey: "autoTranscribe") {
+    var totalPauseDuration: TimeInterval = 0
+    var autoTranscribe: Bool = UserDefaults.standard.bool(forKey: "autoTranscribe") {
         didSet { UserDefaults.standard.set(autoTranscribe, forKey: "autoTranscribe") }
     }
-    @Published var transcriptionModeRaw: String = UserDefaults.standard.string(forKey: "transcriptionMode") ?? TranscriptionMode.postRecording.rawValue {
+    var transcriptionModeRaw: String = UserDefaults.standard.string(forKey: "transcriptionMode") ?? TranscriptionMode.postRecording.rawValue {
         didSet { UserDefaults.standard.set(transcriptionModeRaw, forKey: "transcriptionMode") }
     }
-    @Published var selectedSourceId: String = UserDefaults.standard.string(forKey: "selectedMicrophone") ?? "" {
+    var selectedSourceId: String = UserDefaults.standard.string(forKey: "selectedMicrophone") ?? "" {
         didSet { UserDefaults.standard.set(selectedSourceId, forKey: "selectedMicrophone") }
     }
-    @Published var selectedSystemSourceId: String = UserDefaults.standard.string(forKey: "selectedSystemSource") ?? "" {
+    var selectedSystemSourceId: String = UserDefaults.standard.string(forKey: "selectedSystemSource") ?? "" {
         didSet { UserDefaults.standard.set(selectedSystemSourceId, forKey: "selectedSystemSource") }
     }
     
@@ -57,20 +58,19 @@ final class RecordingEngine: ObservableObject {
 
     let transcriptionManager = TranscriptionManager()
 
-    private let systemCapture = SystemAudioCapture()
-    private let micCapture = MicrophoneCapture()
-    private var audioWriter: AudioFileWriter?
-    private var durationTimer: Timer?
-    private var recordingStartTime: Date?
-    private var pauseStartTime: Date?
-    /// Accumulated pause time from previous pause/resume cycles (not including current pause).
-    private var accumulatedPauseDuration: TimeInterval = 0
-    private var lastSystemLevelUpdate: Date = .distantPast
-    private var lastMicLevelUpdate: Date = .distantPast
-    private let systemLevelUpdateGate = OSAllocatedUnfairLock(initialState: Date.distantPast)
-    private let micLevelUpdateGate = OSAllocatedUnfairLock(initialState: Date.distantPast)
-    private var sleepObserver: NSObjectProtocol?
-    private var wakeObserver: NSObjectProtocol?
+    @ObservationIgnored private let systemCapture = SystemAudioCapture()
+    @ObservationIgnored private let micCapture = MicrophoneCapture()
+    @ObservationIgnored private var audioWriter: AudioFileWriter?
+    @ObservationIgnored private var durationTimer: Timer?
+    @ObservationIgnored private var recordingStartTime: Date?
+    @ObservationIgnored private var pauseStartTime: Date?
+    @ObservationIgnored private var accumulatedPauseDuration: TimeInterval = 0
+    @ObservationIgnored private var lastSystemLevelUpdate: Date = .distantPast
+    @ObservationIgnored private var lastMicLevelUpdate: Date = .distantPast
+    @ObservationIgnored private let systemLevelUpdateGate = OSAllocatedUnfairLock(initialState: Date.distantPast)
+    @ObservationIgnored private let micLevelUpdateGate = OSAllocatedUnfairLock(initialState: Date.distantPast)
+    @ObservationIgnored private var sleepObserver: NSObjectProtocol?
+    @ObservationIgnored private var wakeObserver: NSObjectProtocol?
 
     /// Reusable DateFormatter for recording filenames. Static to avoid repeated allocation.
     private static let recordingTimestampFormatter: DateFormatter = {
@@ -155,10 +155,10 @@ final class RecordingEngine: ObservableObject {
                 }
             }
 
-            // Surface microphone warnings (non-fatal, recording continues)
+            // Surface microphone warnings (non-fatal, recording continues).
+            // Don't overwrite existing errors with warnings.
             micCapture.onWarning = { [weak self] warning in
                 Task { @MainActor in
-                    // Don't overwrite existing errors with warnings
                     if self?.errorMessage == nil {
                         self?.errorMessage = warning
                     }

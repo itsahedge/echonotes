@@ -3,9 +3,9 @@ import SwiftUI
 /// Settings content view — renders the content for a given app section.
 /// The sidebar navigation is handled by MainWindowView.
 struct DesktopSettingsView: View {
-    @EnvironmentObject var recorder: RecordingEngine
-    @EnvironmentObject var tm: TranscriptionManager
-    @EnvironmentObject var modelManager: ModelManager
+    @Environment(RecordingEngine.self) private var recorder
+    @Environment(TranscriptionManager.self) private var tm
+    @Environment(ModelManager.self) private var modelManager
 
     let section: AppSection
 
@@ -48,7 +48,9 @@ struct DesktopSettingsView: View {
     // MARK: - General
 
     private var generalContent: some View {
-        ScrollView {
+        @Bindable var recorder = recorder
+        @Bindable var tm = tm
+        return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 settingsGroup("Transcription") {
                     settingsRow("Mode") {
@@ -98,7 +100,8 @@ struct DesktopSettingsView: View {
     @State private var knowledgeBaseFileCount: Int?
 
     private var knowledgeBaseContent: some View {
-        ScrollView {
+        @Bindable var tm = tm
+        return ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 Text("Point to a folder of markdown files (e.g., an Obsidian vault) to give AI summaries contextual knowledge about your project.")
                     .font(.callout)
@@ -179,7 +182,7 @@ struct DesktopSettingsView: View {
 
     // MARK: - Developer
 
-    @ObservedObject private var debugLog = DebugLogger.shared
+    @State private var debugLog = DebugLogger.shared
 
     private var developerContent: some View {
         VStack(spacing: 0) {

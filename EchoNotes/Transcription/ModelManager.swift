@@ -31,16 +31,17 @@ enum WhisperModel: String, CaseIterable, Sendable {
 /// Manages WhisperKit initialization and model loading.
 /// WhisperKit handles model downloads and caching internally.
 @MainActor
-final class ModelManager: ObservableObject {
-    private let logger = Logger(subsystem: "com.echonotes", category: "ModelManager")
-    @Published var isDownloading = false
-    @Published var isLoading = false
-    @Published var downloadProgress: Double = 0
-    @Published var error: String?
+@Observable
+final class ModelManager {
+    @ObservationIgnored private let logger = Logger(subsystem: "com.echonotes", category: "ModelManager")
+    var isDownloading = false
+    var isLoading = false
+    var downloadProgress: Double = 0
+    var error: String?
 
-    private var whisperKit: WhisperKit?
-    private var loadedModel: WhisperModel?
-    private var progressMonitorTask: Task<Void, Never>?
+    @ObservationIgnored private var whisperKit: WhisperKit?
+    @ObservationIgnored private var loadedModel: WhisperModel?
+    @ObservationIgnored private var progressMonitorTask: Task<Void, Never>?
 
     /// Get a ready-to-use WhisperEngine, downloading the model if needed.
     func ensureEngine(for model: WhisperModel) async throws -> WhisperEngine {

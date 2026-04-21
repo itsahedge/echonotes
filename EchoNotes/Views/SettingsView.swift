@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Settings page for app configuration (AI provider, model, OAuth, etc).
 struct SettingsView: View {
-    @ObservedObject var tm: TranscriptionManager
+    @Bindable var tm: TranscriptionManager
     var onBack: (() -> Void)? = nil
 
     @State private var apiKeyInput: String = ""

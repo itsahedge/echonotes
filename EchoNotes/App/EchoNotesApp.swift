@@ -8,10 +8,10 @@ struct EchoNotesApp: App {
     var body: some Scene {
         WindowGroup {
             MainWindowView()
-                .environmentObject(appDelegate.recorder)
-                .environmentObject(appDelegate.recorder.transcriptionManager)
-                .environmentObject(appDelegate.recorder.transcriptionManager.modelManager)
-                .environmentObject(appDelegate.library)
+                .environment(appDelegate.recorder)
+                .environment(appDelegate.recorder.transcriptionManager)
+                .environment(appDelegate.recorder.transcriptionManager.modelManager)
+                .environment(appDelegate.library)
         }
         .defaultSize(width: 960, height: 640)
     }

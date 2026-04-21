@@ -6,8 +6,9 @@ import os
 /// Manages OpenAI OAuth 2.1 + PKCE authentication flow.
 /// Uses the same client ID and endpoints as OpenAI Codex CLI.
 @MainActor
-final class OAuthManager: ObservableObject {
-    private let logger = Logger(subsystem: "com.echonotes", category: "OAuth")
+@Observable
+final class OAuthManager {
+    @ObservationIgnored private let logger = Logger(subsystem: "com.echonotes", category: "OAuth")
 
     // OpenAI OAuth constants (same as Codex CLI)
     nonisolated static let clientId = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -20,14 +21,14 @@ final class OAuthManager: ObservableObject {
     // OpenAI likely has this redirect URI registered for the client ID
     nonisolated private static let callbackPort: UInt16 = 1455
 
-    @Published var isAuthenticating = false
-    @Published var isAuthenticated = false
-    @Published var error: String?
-    @Published var userEmail: String?
+    var isAuthenticating = false
+    var isAuthenticated = false
+    var error: String?
+    var userEmail: String?
 
-    private var callbackServer: OAuthCallbackServer?
-    private var pkce: PKCECodes?
-    private var state: String?
+    @ObservationIgnored private var callbackServer: OAuthCallbackServer?
+    @ObservationIgnored private var pkce: PKCECodes?
+    @ObservationIgnored private var state: String?
 
     /// Stored tokens
     struct OAuthTokens: Codable {

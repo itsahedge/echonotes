@@ -29,10 +29,10 @@ enum AppSection: String, CaseIterable, Identifiable {
 
 /// Root view — Craft-style left sidebar with navigation sections + content area.
 struct MainWindowView: View {
-    @EnvironmentObject var recorder: RecordingEngine
-    @EnvironmentObject var tm: TranscriptionManager
-    @EnvironmentObject var modelManager: ModelManager
-    @EnvironmentObject var library: RecordingLibrary
+    @Environment(RecordingEngine.self) private var recorder
+    @Environment(TranscriptionManager.self) private var tm
+    @Environment(ModelManager.self) private var modelManager
+    @Environment(RecordingLibrary.self) private var library
 
     @State private var selectedSection: AppSection = .meetings
     @State private var selectedEntryID: URL?
@@ -176,7 +176,8 @@ struct MainWindowView: View {
     }
 
     private var meetingListPanel: some View {
-        VStack(spacing: 0) {
+        @Bindable var library = library
+        return VStack(spacing: 0) {
             HStack {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
@@ -267,6 +268,7 @@ struct MainWindowView: View {
 
     @ViewBuilder
     private var toolbarContent: some View {
+        @Bindable var recorder = recorder
         if recorder.isRecording {
             HStack(spacing: 6) {
                 Circle().fill(.red).frame(width: 8, height: 8)
@@ -329,7 +331,8 @@ struct MainWindowView: View {
     // MARK: - Empty States
 
     private var emptyStateView: some View {
-        VStack(spacing: 16) {
+        @Bindable var recorder = recorder
+        return VStack(spacing: 16) {
             Image(systemName: "mic.badge.plus")
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)

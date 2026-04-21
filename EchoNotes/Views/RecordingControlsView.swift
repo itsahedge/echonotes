@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Primary recording control button (start/stop) with pause/resume controls.
 struct RecordingControlsView: View {
-    @ObservedObject var recorder: RecordingEngine
+    let recorder: RecordingEngine
 
     var body: some View {
         Group {

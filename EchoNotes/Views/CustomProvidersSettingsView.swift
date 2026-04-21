@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct CustomProvidersSettingsView: View {
-    @ObservedObject var tm: TranscriptionManager
-    @ObservedObject var recorder: RecordingEngine
-    @StateObject private var providerStore = CustomProviderStore()
-    
+    @Bindable var tm: TranscriptionManager
+    @Bindable var recorder: RecordingEngine
+    @State private var providerStore = CustomProviderStore()
+
     @State private var showAddSheet = false
     @State private var selectedProvider: CustomProvider?
     
@@ -108,7 +108,8 @@ struct CustomProviderRow: View {
 
 struct AddCustomProviderSheet: View {
     @Environment(\.dismiss) private var dismiss
-    @ObservedObject var providerStore: CustomProviderStore
+    @Bindable var providerStore: CustomProviderStore
+
     
     @State private var name: String = ""
     @State private var endpoint: String = ""

@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct AIProvidersSettingsView: View {
-    @ObservedObject var tm: TranscriptionManager
+    @Bindable var tm: TranscriptionManager
     @State private var anthropicApiKeyInput: String = ""
     @State private var googleApiKeyInput: String = ""
-    
+
     init(tm: TranscriptionManager) {
         self.tm = tm
         _anthropicApiKeyInput = State(initialValue: tm.anthropicAPIKey)
