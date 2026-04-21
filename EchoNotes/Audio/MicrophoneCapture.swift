@@ -347,11 +347,16 @@ final class MicrophoneCapture: @unchecked Sendable {
         guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else { return }
 
         var error: NSError?
-        var hasData = true
+        let didProvideInput = OSAllocatedUnfairLock(initialState: false)
         converter.convert(to: outputBuffer, error: &error) { _, outStatus in
-            if hasData {
+            let shouldProvideInput = didProvideInput.withLock { hasProvidedInput in
+                guard !hasProvidedInput else { return false }
+                hasProvidedInput = true
+                return true
+            }
+
+            if shouldProvideInput {
                 outStatus.pointee = .haveData
-                hasData = false
                 return buffer
             }
             outStatus.pointee = .noDataNow

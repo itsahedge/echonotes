@@ -64,10 +64,11 @@ final class RecordingEngine {
     @ObservationIgnored private var durationTimer: Timer?
     @ObservationIgnored private var recordingStartTime: Date?
     @ObservationIgnored private var pauseStartTime: Date?
-    /// Accumulated pause time from previous pause/resume cycles (not including current pause).
     @ObservationIgnored private var accumulatedPauseDuration: TimeInterval = 0
     @ObservationIgnored private var lastSystemLevelUpdate: Date = .distantPast
     @ObservationIgnored private var lastMicLevelUpdate: Date = .distantPast
+    @ObservationIgnored private let systemLevelUpdateGate = OSAllocatedUnfairLock(initialState: Date.distantPast)
+    @ObservationIgnored private let micLevelUpdateGate = OSAllocatedUnfairLock(initialState: Date.distantPast)
     @ObservationIgnored private var sleepObserver: NSObjectProtocol?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
 
@@ -126,8 +127,9 @@ final class RecordingEngine {
             // Set up audio file writer (M4A/AAC, 48kHz stereo — system L, mic R)
             let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: AudioConfig.sampleRate, channels: 2) { [weak self] error in
                 Task { @MainActor in
-                    self?.errorMessage = "Recording error: \(error.localizedDescription)"
-                    await self?.stopRecording()
+                    guard let self, self.isRecording else { return }
+                    self.errorMessage = "Recording error: \(error.localizedDescription)"
+                    await self.stopRecording()
                 }
             }
 
@@ -139,15 +141,17 @@ final class RecordingEngine {
             // Surface audio capture errors to the UI
             systemCapture.onError = { [weak self] error in
                 Task { @MainActor in
-                    self?.errorMessage = "System audio error: \(error.localizedDescription)"
-                    await self?.stopRecording()
+                    guard let self, self.isRecording else { return }
+                    self.errorMessage = "System audio error: \(error.localizedDescription)"
+                    await self.stopRecording()
                 }
             }
 
             micCapture.onError = { [weak self] error in
                 Task { @MainActor in
-                    self?.errorMessage = "Microphone error: \(error.localizedDescription)"
-                    await self?.stopRecording()
+                    guard let self, self.isRecording else { return }
+                    self.errorMessage = "Microphone error: \(error.localizedDescription)"
+                    await self.stopRecording()
                 }
             }
 
@@ -192,32 +196,36 @@ final class RecordingEngine {
             // Both types use internal locking and are safe to call from any thread.
             let writerRef = writer
             let transcriberRef = isLive ? transcriptionManager.streamingTranscriber : nil
+            let systemLevelUpdateGate = self.systemLevelUpdateGate
+            let micLevelUpdateGate = self.micLevelUpdateGate
+            systemLevelUpdateGate.withLock { $0 = .distantPast }
+            micLevelUpdateGate.withLock { $0 = .distantPast }
 
             // Now that both captures are running, set up buffer callbacks
             systemCapture.onBuffer = { [weak self] buffer in
                 writerRef.writeSystemBuffer(buffer)
                 transcriberRef?.feedSamples(buffer.samples)
-                // Throttle level meter updates to ~15fps (66ms minimum interval)
+                let now = Date()
+                guard RecordingEngine.shouldScheduleLevelUpdate(using: systemLevelUpdateGate, at: now) else { return }
+                let level = SourcedAudioBuffer.rmsLevel(buffer.samples)
+
                 Task { @MainActor in
-                    guard let self else { return }
-                    let now = Date()
-                    if now.timeIntervalSince(self.lastSystemLevelUpdate) > 0.066 {
-                        self.systemLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
-                        self.lastSystemLevelUpdate = now
-                    }
+                    guard let self, self.isRecording else { return }
+                    self.systemLevel = level
+                    self.lastSystemLevelUpdate = now
                 }
             }
 
             micCapture.onBuffer = { [weak self] buffer in
                 writerRef.writeMicBuffer(buffer)
-                // Throttle level meter updates to ~15fps (66ms minimum interval)
+                let now = Date()
+                guard RecordingEngine.shouldScheduleLevelUpdate(using: micLevelUpdateGate, at: now) else { return }
+                let level = SourcedAudioBuffer.rmsLevel(buffer.samples)
+
                 Task { @MainActor in
-                    guard let self else { return }
-                    let now = Date()
-                    if now.timeIntervalSince(self.lastMicLevelUpdate) > 0.066 {
-                        self.micLevel = SourcedAudioBuffer.rmsLevel(buffer.samples)
-                        self.lastMicLevelUpdate = now
-                    }
+                    guard let self, self.isRecording else { return }
+                    self.micLevel = level
+                    self.lastMicLevelUpdate = now
                 }
             }
 
@@ -416,5 +424,16 @@ final class RecordingEngine {
     private func cleanup() {
         audioWriter = nil
         recordingStartTime = nil
+    }
+
+    nonisolated private static func shouldScheduleLevelUpdate(
+        using gate: OSAllocatedUnfairLock<Date>,
+        at now: Date
+    ) -> Bool {
+        gate.withLock { lastUpdate in
+            guard now.timeIntervalSince(lastUpdate) >= 0.066 else { return false }
+            lastUpdate = now
+            return true
+        }
     }
 }

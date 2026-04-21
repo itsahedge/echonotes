@@ -54,25 +54,23 @@ struct MainWindowView: View {
                 toolbarContent
             }
         }
-        .onAppear { library.scan() }
+        .task {
+            library.requestRefresh()
+        }
         .onChange(of: recorder.isRecording) { _, isRecording in
             if isRecording {
-                // Scan + select the new entry as soon as recording starts
                 selectedSection = .meetings
-                library.scan()
+                library.requestRefresh()
                 if let url = recorder.lastRecordingURL {
                     selectedEntryID = url
                 }
             } else {
-                // Re-scan after recording stops so duration/metadata updates
-                library.scan()
+                library.requestRefresh()
             }
         }
         .onChange(of: tm.isTranscribing) { _, isTranscribing in
             if !isTranscribing {
-                // Re-scan after transcription completes so transcript preview updates
-                library.scan()
-                // Auto-select the newly transcribed recording
+                library.requestRefresh()
                 if let url = tm.transcript?.recordingURL {
                     selectedEntryID = url
                 }
@@ -80,8 +78,7 @@ struct MainWindowView: View {
         }
         .onChange(of: tm.isSummarizing) { _, isSummarizing in
             if !isSummarizing {
-                // Re-scan after summary so the entry reflects updated state
-                library.scan()
+                library.requestRefresh()
             }
         }
     }
@@ -247,7 +244,6 @@ struct MainWindowView: View {
             ActiveRecordingView()
         } else if let entry = selectedEntry {
             RecordingDetailView(entry: entry)
-                .id(entry.id)
         } else if let summary = tm.summary, let transcript = tm.transcript {
             SummaryView(summary: summary, recordingURL: transcript.recordingURL, onBack: {
                 tm.summary = nil
@@ -282,6 +278,29 @@ struct MainWindowView: View {
         } else {
             Text("Ready")
                 .foregroundStyle(.secondary)
+        }
+
+        if let entry = selectedEntry {
+            Menu {
+                if entry.hasTranscript {
+                    Button(action: { copyTranscript(for: entry) }) {
+                        Label("Copy Transcript", systemImage: "doc.on.doc")
+                    }
+                }
+                if hasSummary(for: entry) {
+                    Button(action: { copySummary(for: entry) }) {
+                        Label("Copy Summary", systemImage: "doc.on.doc")
+                    }
+                }
+                Divider()
+                Button(action: {
+                    NSWorkspace.shared.selectFile(entry.url.path, inFileViewerRootedAtPath: entry.url.deletingLastPathComponent().path)
+                }) {
+                    Label("Show in Finder", systemImage: "folder")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
         }
 
         Picker("Mode", selection: $recorder.transcriptionModeRaw) {
@@ -373,6 +392,31 @@ struct MainWindowView: View {
             .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func summaryURL(for entry: RecordingEntry) -> URL {
+        entry.url.deletingPathExtension().appendingPathExtension("summary.json")
+    }
+
+    private func hasSummary(for entry: RecordingEntry) -> Bool {
+        FileManager.default.fileExists(atPath: summaryURL(for: entry).path)
+    }
+
+    private func copyTranscript(for entry: RecordingEntry) {
+        guard let transcript = entry.loadTranscript() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(transcript.toPlainText(), forType: .string)
+    }
+
+    private func copySummary(for entry: RecordingEntry) {
+        let url = summaryURL(for: entry)
+        guard let data = try? Data(contentsOf: url),
+              let summary = try? JSONDecoder().decode(MeetingSummary.self, from: data) else {
+            return
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(summary.toMarkdown(), forType: .string)
     }
 }
 

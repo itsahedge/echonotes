@@ -149,11 +149,22 @@ final class WhisperEngine: @unchecked Sendable {
         let outFrames = AVAudioFrameCount(Double(samples.count) * dstRate / srcRate) + 256
         let outBuf = AVAudioPCMBuffer(pcmFormat: dstFmt, frameCapacity: outFrames)!
 
-        var fed = false
+        let didProvideInput = OSAllocatedUnfairLock(initialState: false)
         var err: NSError?
         converter.convert(to: outBuf, error: &err) { _, status in
-            if !fed { fed = true; status.pointee = .haveData; return inBuf }
-            status.pointee = .noDataNow; return nil
+            let shouldProvideInput = didProvideInput.withLock { hasProvidedInput in
+                guard !hasProvidedInput else { return false }
+                hasProvidedInput = true
+                return true
+            }
+
+            if shouldProvideInput {
+                status.pointee = .haveData
+                return inBuf
+            }
+
+            status.pointee = .noDataNow
+            return nil
         }
         if let err { throw err }
 

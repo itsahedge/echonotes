@@ -332,11 +332,11 @@ final class TranscriptionManager {
 
     /// Pause live transcription — flush current chunks and stop accepting new audio
     func pauseLiveTranscription() async {
-        await streamingTranscriber.pause()
+        streamingTranscriber.pause()
     }
 
     /// Resume live transcription — continue processing from where we left off
     func resumeLiveTranscription() async {
-        await streamingTranscriber.resume()
+        streamingTranscriber.resume()
     }
 }
