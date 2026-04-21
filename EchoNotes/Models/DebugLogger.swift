@@ -4,7 +4,8 @@ import os
 /// In-app debug log that captures entries for display in the UI.
 /// Wraps os.Logger so entries go to both Console.app and the in-app debug console.
 @MainActor
-final class DebugLogger: ObservableObject {
+@Observable
+final class DebugLogger {
     static let shared = DebugLogger()
 
     struct Entry: Identifiable {
@@ -22,10 +23,10 @@ final class DebugLogger: ObservableObject {
         }
     }
 
-    @Published private(set) var entries: [Entry] = []
+    private(set) var entries: [Entry] = []
 
     /// Maximum entries to keep in memory.
-    private let maxEntries = 500
+    @ObservationIgnored private let maxEntries = 500
 
     private init() {}
 

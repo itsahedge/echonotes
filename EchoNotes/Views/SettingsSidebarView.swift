@@ -1,12 +1,11 @@
 import SwiftUI
-import Combine
 
 struct SettingsSidebarView: View {
-    @EnvironmentObject var tm: TranscriptionManager
-    @EnvironmentObject var recorder: RecordingEngine
-    
+    @Environment(TranscriptionManager.self) private var tm
+    @Environment(RecordingEngine.self) private var recorder
+
     @State private var selectedSection: SettingsSection = .general
-    
+
     var body: some View {
         NavigationSplitView {
             SettingsSidebarNavigation(selection: $selectedSection)
@@ -61,9 +60,9 @@ struct SettingsSidebarNavigation: View {
 
 struct SettingsSectionView: View {
     let section: SettingsSection
-    @ObservedObject var tm: TranscriptionManager
-    @ObservedObject var recorder: RecordingEngine
-    
+    @Bindable var tm: TranscriptionManager
+    @Bindable var recorder: RecordingEngine
+
     var body: some View {
         Group {
             switch section {

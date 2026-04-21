@@ -2,9 +2,9 @@ import SwiftUI
 
 /// Shows active recording state: timer, level meters, live transcript, or transcription progress.
 struct ActiveRecordingView: View {
-    @EnvironmentObject var recorder: RecordingEngine
-    @EnvironmentObject var tm: TranscriptionManager
-    @EnvironmentObject var modelManager: ModelManager
+    @Environment(RecordingEngine.self) private var recorder
+    @Environment(TranscriptionManager.self) private var tm
+    @Environment(ModelManager.self) private var modelManager
 
     var body: some View {
         VStack(spacing: 20) {

@@ -1,4 +1,3 @@
-import Combine
 import Foundation
 import os
 
@@ -13,20 +12,21 @@ enum TranscriptionMode: String, CaseIterable {
 /// **Role as coordinator:**
 /// While this might seem like an unnecessary layer, it serves as a clear boundary between
 /// recording (RecordingEngine) and transcription (WhisperEngine/StreamingTranscriber).
-/// It owns the transcription state (@Published properties), manages the lifecycle of both
-/// post-recording and live transcription modes, and provides a single interface for the UI.
-/// This separation keeps RecordingEngine focused on audio I/O and allows transcription
-/// logic to evolve independently.
+/// It owns the transcription state, manages the lifecycle of both post-recording and live
+/// transcription modes, and provides a single interface for the UI. This separation keeps
+/// RecordingEngine focused on audio I/O and allows transcription logic to evolve independently.
 @MainActor
-final class TranscriptionManager: ObservableObject {
-    private let logger = Logger(subsystem: "com.echonotes", category: "TranscriptionManager")
-    private var debugLog: DebugLogger { DebugLogger.shared }
-    @Published var isTranscribing = false
-    @Published var progress: Double = 0
-    @Published var transcript: Transcript?
-    @Published var error: String?
-    @Published var isSummarizing = false
-    @Published var summary: MeetingSummary?
+@Observable
+final class TranscriptionManager {
+    @ObservationIgnored private let logger = Logger(subsystem: "com.echonotes", category: "TranscriptionManager")
+    @ObservationIgnored private var debugLog: DebugLogger { DebugLogger.shared }
+
+    var isTranscribing = false
+    var progress: Double = 0
+    var transcript: Transcript?
+    var error: String?
+    var isSummarizing = false
+    var summary: MeetingSummary?
 
     // MARK: - AI Provider Settings
 
@@ -43,22 +43,22 @@ final class TranscriptionManager: ObservableObject {
     private static let useKnowledgeBaseDefaultsKey = "useKnowledgeBase"
 
     /// API key for the selected AI provider.
-    @Published var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
+    var openaiAPIKey: String = UserDefaults.standard.string(forKey: apiKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(openaiAPIKey, forKey: Self.apiKeyDefaultsKey) }
     }
 
     /// API key for Anthropic.
-    @Published var anthropicAPIKey: String = UserDefaults.standard.string(forKey: anthropicApiKeyDefaultsKey) ?? "" {
+    var anthropicAPIKey: String = UserDefaults.standard.string(forKey: anthropicApiKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(anthropicAPIKey, forKey: Self.anthropicApiKeyDefaultsKey) }
     }
 
     /// API key for Google Gemini.
-    @Published var googleAPIKey: String = UserDefaults.standard.string(forKey: googleApiKeyDefaultsKey) ?? "" {
+    var googleAPIKey: String = UserDefaults.standard.string(forKey: googleApiKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(googleAPIKey, forKey: Self.googleApiKeyDefaultsKey) }
     }
 
     /// Selected AI provider for summarization.
-    @Published var selectedProvider: AIProvider = {
+    var selectedProvider: AIProvider = {
         if let raw = UserDefaults.standard.string(forKey: providerDefaultsKey),
            let provider = AIProvider(rawValue: raw) {
             return provider
@@ -69,45 +69,38 @@ final class TranscriptionManager: ObservableObject {
     }
 
     /// Selected model for AI summarization.
-    @Published var selectedAIModel: String = UserDefaults.standard.string(forKey: aiModelDefaultsKey) ?? AIProvider.openai.defaultModel {
+    var selectedAIModel: String = UserDefaults.standard.string(forKey: aiModelDefaultsKey) ?? AIProvider.openai.defaultModel {
         didSet { UserDefaults.standard.set(selectedAIModel, forKey: Self.aiModelDefaultsKey) }
     }
 
     /// Custom OpenAI-compatible endpoint URL.
-    @Published var customEndpoint: String = UserDefaults.standard.string(forKey: customEndpointDefaultsKey) ?? "http://localhost:8080/v1/chat/completions" {
+    var customEndpoint: String = UserDefaults.standard.string(forKey: customEndpointDefaultsKey) ?? "http://localhost:8080/v1/chat/completions" {
         didSet { UserDefaults.standard.set(customEndpoint, forKey: Self.customEndpointDefaultsKey) }
     }
 
     /// Custom model name for the custom endpoint.
-    @Published var customModel: String = UserDefaults.standard.string(forKey: customModelDefaultsKey) ?? "" {
+    var customModel: String = UserDefaults.standard.string(forKey: customModelDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(customModel, forKey: Self.customModelDefaultsKey) }
     }
 
     /// Optional API key for the custom endpoint.
-    @Published var customAPIKey: String = UserDefaults.standard.string(forKey: customAPIKeyDefaultsKey) ?? "" {
+    var customAPIKey: String = UserDefaults.standard.string(forKey: customAPIKeyDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(customAPIKey, forKey: Self.customAPIKeyDefaultsKey) }
     }
 
     /// Path to a knowledge base folder (e.g., Obsidian vault) for contextual summaries.
-    @Published var knowledgeBasePath: String = UserDefaults.standard.string(forKey: knowledgeBasePathDefaultsKey) ?? "" {
+    var knowledgeBasePath: String = UserDefaults.standard.string(forKey: knowledgeBasePathDefaultsKey) ?? "" {
         didSet { UserDefaults.standard.set(knowledgeBasePath, forKey: Self.knowledgeBasePathDefaultsKey) }
     }
 
     /// Whether to include knowledge base context in AI summaries.
-    @Published var useKnowledgeBase: Bool = UserDefaults.standard.bool(forKey: useKnowledgeBaseDefaultsKey) {
+    var useKnowledgeBase: Bool = UserDefaults.standard.bool(forKey: useKnowledgeBaseDefaultsKey) {
         didSet { UserDefaults.standard.set(useKnowledgeBase, forKey: Self.useKnowledgeBaseDefaultsKey) }
     }
 
-    /// OAuth manager for ChatGPT login
+    /// OAuth manager for ChatGPT login. Views that read `oauthManager.x` register observation
+    /// through the Observation framework directly, so no Combine bridge is needed.
     let oauthManager = OAuthManager()
-    private var oauthCancellable: AnyCancellable?
-
-    init() {
-        // Forward OAuthManager changes to trigger SwiftUI updates
-        oauthCancellable = oauthManager.objectWillChange.sink { [weak self] _ in
-            self?.objectWillChange.send()
-        }
-    }
 
     /// Whether the current provider is configured and ready to use.
     var isAIConfigured: Bool {
@@ -168,11 +161,11 @@ final class TranscriptionManager: ObservableObject {
 
     let modelManager = ModelManager()
     let streamingTranscriber = StreamingTranscriber()
-    private var whisperEngine: WhisperEngine?
-    private var transcriptionTask: Task<Void, Never>?
+    @ObservationIgnored private var whisperEngine: WhisperEngine?
+    @ObservationIgnored private var transcriptionTask: Task<Void, Never>?
 
     /// The model to use for transcription. Persisted via UserDefaults.
-    @Published var selectedModel: WhisperModel = {
+    var selectedModel: WhisperModel = {
         if let raw = UserDefaults.standard.string(forKey: whisperModelDefaultsKey),
            let model = WhisperModel(rawValue: raw) {
             return model

@@ -2,11 +2,12 @@ import SwiftUI
 
 /// Sidebar listing past recordings with search.
 struct SidebarView: View {
-    @EnvironmentObject var library: RecordingLibrary
+    @Environment(RecordingLibrary.self) private var library
     @Binding var selectedEntryID: URL?
 
     var body: some View {
-        VStack(spacing: 0) {
+        @Bindable var library = library
+        return VStack(spacing: 0) {
             // Search field
             HStack {
                 Image(systemName: "magnifyingglass")

@@ -59,10 +59,11 @@ struct RecordingEntry: Identifiable, Hashable, Sendable {
 
 /// Scans ~/Documents/EchoNotes/ for past recordings and their transcripts.
 @MainActor
-final class RecordingLibrary: ObservableObject {
-    private let logger = Logger(subsystem: "com.echonotes", category: "RecordingLibrary")
-    @Published var entries: [RecordingEntry] = []
-    @Published var searchQuery: String = ""
+@Observable
+final class RecordingLibrary {
+    @ObservationIgnored private let logger = Logger(subsystem: "com.echonotes", category: "RecordingLibrary")
+    var entries: [RecordingEntry] = []
+    var searchQuery: String = ""
 
     var filteredEntries: [RecordingEntry] {
         guard !searchQuery.isEmpty else { return entries }

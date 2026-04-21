@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Displays a browsable list of past recordings.
 struct LibraryView: View {
-    @ObservedObject var library: RecordingLibrary
+    @Bindable var library: RecordingLibrary
     let onSelect: (RecordingEntry) -> Void
     let onBack: () -> Void
 

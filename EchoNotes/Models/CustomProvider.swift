@@ -28,11 +28,13 @@ struct CustomProvider: Identifiable, Codable, Sendable, Hashable {
 }
 
 /// Storage for custom providers
-final class CustomProviderStore: ObservableObject {
-    @Published var providers: [CustomProvider] = []
-    
-    private static let key = "customProviders"
-    
+@MainActor
+@Observable
+final class CustomProviderStore {
+    var providers: [CustomProvider] = []
+
+    @ObservationIgnored private static let key = "customProviders"
+
     init() {
         load()
     }

@@ -3,7 +3,7 @@ import SwiftUI
 /// Detail view for a single recording — shows full transcript with AI summary option.
 struct RecordingDetailView: View {
     let entry: RecordingEntry
-    @EnvironmentObject var tm: TranscriptionManager
+    @Environment(TranscriptionManager.self) private var tm
 
     @State private var transcript: Transcript?
     @State private var summary: MeetingSummary?

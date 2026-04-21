@@ -12,41 +12,42 @@ import os
 /// Samples are serialized through a lock-protected buffer to guarantee ordering,
 /// then drained on the MainActor for processing.
 @MainActor
-final class StreamingTranscriber: ObservableObject {
-    private let logger = Logger(subsystem: "com.echonotes", category: "StreamingTranscriber")
-    @Published var segments: [TranscriptSegment] = []
+@Observable
+final class StreamingTranscriber {
+    @ObservationIgnored private let logger = Logger(subsystem: "com.echonotes", category: "StreamingTranscriber")
+    var segments: [TranscriptSegment] = []
     /// Older segments flushed from live memory to prevent unbounded growth.
     private(set) var flushedSegments: [TranscriptSegment] = []
     /// Maximum segments to keep in memory during live mode.
-    private let maxLiveSegments = 500
-    @Published var isProcessing = false
-    @Published var error: String?
-    @Published var isPaused = false
-    /// Thread-safe pause flag for nonisolated feedSamples (avoids data race on @Published isPaused).
-    private let pausedLock = OSAllocatedUnfairLock(initialState: false)
+    @ObservationIgnored private let maxLiveSegments = 500
+    var isProcessing = false
+    var error: String?
+    var isPaused = false
+    /// Thread-safe pause flag for nonisolated feedSamples (avoids data race on the observed isPaused).
+    @ObservationIgnored private let pausedLock = OSAllocatedUnfairLock(initialState: false)
 
     /// Seconds of audio to accumulate before running inference.
     /// 5s gives fast feedback; Whisper base.en processes this in <1s on M-series.
-    private let chunkSeconds: Double = 5.0
+    @ObservationIgnored private let chunkSeconds: Double = 5.0
 
-    private var whisperEngine: WhisperEngine?
-    private var totalSamplesProcessed: Int = 0
-    private var processingTask: Task<Void, Never>?
-    private let sampleRate: Double = 48000
+    @ObservationIgnored private var whisperEngine: WhisperEngine?
+    @ObservationIgnored private var totalSamplesProcessed: Int = 0
+    @ObservationIgnored private var processingTask: Task<Void, Never>?
+    @ObservationIgnored private let sampleRate: Double = 48000
 
     /// Lock-protected incoming sample buffer. Written from audio callbacks,
     /// drained on MainActor. The lock guarantees FIFO ordering regardless
     /// of which thread the audio callback fires on.
-    private nonisolated(unsafe) let sampleLock = NSLock()
-    private nonisolated(unsafe) var incomingSamples: [Float] = []
+    @ObservationIgnored private nonisolated(unsafe) let sampleLock = NSLock()
+    @ObservationIgnored private nonisolated(unsafe) var incomingSamples: [Float] = []
 
     /// Reusable audio converter (48kHz → 16kHz). Created once in prepare()
     /// to avoid repeated allocation per chunk. Only read from nonisolated
     /// resample() after being set on MainActor — safe because prepare()
     /// is always called before any audio flows.
-    private nonisolated(unsafe) var resampler: AVAudioConverter?
-    private nonisolated(unsafe) let srcFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
-    private nonisolated(unsafe) let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+    @ObservationIgnored private nonisolated(unsafe) var resampler: AVAudioConverter?
+    @ObservationIgnored private nonisolated(unsafe) let srcFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
+    @ObservationIgnored private nonisolated(unsafe) let dstFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
 
     func prepare(engine: WhisperEngine) {
         self.whisperEngine = engine
@@ -120,7 +121,7 @@ final class StreamingTranscriber: ObservableObject {
 
     /// Process a chunk of audio samples through Whisper.
     /// If already processing, appends to a queue that gets picked up after.
-    private var queuedSamples: [Float] = []
+    @ObservationIgnored private var queuedSamples: [Float] = []
 
     private func processChunk(_ samples: [Float]) {
         if isProcessing {
