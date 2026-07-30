@@ -111,10 +111,15 @@ final class MicrophoneCapture: @unchecked Sendable {
 
     /// Rebuild a fresh engine after a pause. Falls back to the silence feed
     /// (with a warning) if no input device is available.
+    ///
+    /// `_isPaused` is cleared only after `attachEngine()` succeeds: if it
+    /// throws (converter creation or engine start failing right after wake),
+    /// the track stays `paused` so a later resume can retry, instead of being
+    /// left capturing-but-dead with no engine and no silence feed.
     func resumeCapture() throws {
         guard _isCapturing.withLock({ $0 }), _isPaused.withLock({ $0 }) else { return }
-        _isPaused.withLock { $0 = false }
         try attachEngine()
+        _isPaused.withLock { $0 = false }
     }
 
     /// Stop capturing and close the file. Idempotent.

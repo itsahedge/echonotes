@@ -52,7 +52,7 @@ struct RecordingDetailView: View {
                             .foregroundStyle(.tertiary)
 
                         Button(action: {
-                            Task { await tm.transcribe(audioURL: entry.url) }
+                            tm.transcribe(audioURL: entry.url)
                         }) {
                             HStack {
                                 Image(systemName: "text.bubble")

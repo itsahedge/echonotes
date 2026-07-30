@@ -289,14 +289,24 @@ final class TranscriptionManager {
         Task {
             while !pendingTranscriptions.isEmpty {
                 let next = pendingTranscriptions.removeFirst()
-                await transcribe(audioURL: next)
+                await performTranscription(audioURL: next)
             }
             isDrainingQueue = false
         }
     }
 
-    /// Transcribe an audio file end-to-end.
-    func transcribe(audioURL: URL) async {
+    /// Transcribe a recording (UI entry point). Routes through the serial
+    /// queue so a manual tap and an auto-transcribe drain can't race — a
+    /// direct call used to bypass the queue and could no-op a drained job,
+    /// silently dropping it from the in-memory queue.
+    func transcribe(audioURL: URL) {
+        enqueue(audioURL)
+    }
+
+    /// The queue worker. Only `drainQueueIfIdle` calls this, and only one at a
+    /// time, so it never overlaps itself — the `isTranscribing` guard is an
+    /// invariant check, not a drop path.
+    private func performTranscription(audioURL: URL) async {
         guard !isTranscribing else { return }
 
         isTranscribing = true
