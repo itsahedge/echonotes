@@ -4,7 +4,7 @@
 
 EchoNotes is a native macOS desktop app that records audio from **any** call — Zoom, Google Meet, FaceTime, Discord, phone calls, whatever — and transcribes it locally using [WhisperKit](https://github.com/argmaxinc/WhisperKit). Optionally generate AI-powered meeting summaries with your existing ChatGPT subscription or any API key.
 
-**🎤 AUDIO-ONLY APP** — We capture system audio output (other people on calls) and microphone input (your voice). No video, screen recording, or visual data whatsoever.
+**🎤 AUDIO-ONLY APP** — We capture system audio output (other people on calls) and microphone input (your voice). No video, screen recording, or visual data whatsoever — and no Screen Recording permission either: system audio comes from a Core Audio process tap.
 
 ## Features
 
@@ -23,16 +23,16 @@ EchoNotes is a native macOS desktop app that records audio from **any** call —
 ## How It Works
 
 ```
-ScreenCaptureKit (system audio) ──→ Left channel  ──┐
-                                                     ├──→ Stereo M4A
-AVAudioEngine (microphone)      ──→ Right channel ──┘
-                                                         │
-                                              WhisperKit (CoreML)
-                                                         │
-                                                    Transcript
-                                                  (.txt + .json)
-                                                         │
-                                              AI Provider (optional)
+Core Audio process tap (system audio) ──→ system.caf ──┐
+                                                        ├──→ session folder + meta.json
+AVAudioEngine (microphone)            ──→ mic.caf    ──┘
+                                                            │
+                                              WhisperKit (CoreML, per track)
+                                                            │
+                                              merged Transcript ("You"/"Them")
+                                              (transcript.txt + transcript.json)
+                                                            │
+                                                  AI Provider (optional)
                                                          │
                                                  Meeting Summary
                                           (key points, actions, decisions)
@@ -40,7 +40,7 @@ AVAudioEngine (microphone)      ──→ Right channel ──┘
 
 ## Requirements
 
-- **macOS 14.0+** (Sonoma or later)
+- **macOS 15.0+** (Sequoia or later — system audio capture uses Core Audio process taps)
 - **Apple Silicon** (M1 or later recommended for fast transcription)
 
 ## Build & Run
@@ -79,9 +79,9 @@ On first launch, the app downloads a Whisper model (~150MB for Base English). Th
 
 macOS will ask for:
 - **Microphone** — to capture your voice
-- **Screen & System Audio Recording** — to capture system audio output
+- **System Audio Recording Only** — to capture system audio output (prompted on first recording)
 
-**Why "Screen Recording"?** macOS requires this permission to access ScreenCaptureKit's audio API. We use it in audio-only mode — no video or screen content is captured.
+No Screen Recording permission is needed: system audio is captured through a Core Audio process tap, which has its own audio-only permission under System Settings → Privacy & Security → Screen & System Audio Recording.
 
 ## Usage
 
@@ -90,7 +90,7 @@ macOS will ask for:
 3. Start a call in any app
 4. Click **Record** in the toolbar (or press **⌘⇧R**)
 5. Click **Stop** when done
-6. Your M4A + transcript are saved to `~/Documents/EchoNotes/`
+6. Your recording (mic + system tracks) + transcript are saved to a session folder in `~/Documents/EchoNotes/`
 7. Select a recording in the sidebar to view the transcript
 8. Click **Ask EchoNotes** to generate an AI summary
 9. Open **Settings** (⌘,) to configure AI provider, Whisper model, and transcription defaults

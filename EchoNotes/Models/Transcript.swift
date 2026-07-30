@@ -73,12 +73,15 @@ struct Transcript: Codable, Sendable {
         return try encoder.encode(self)
     }
 
-    /// Save `.txt` and `.json` files alongside the recording.
-    /// Uses atomic writes to prevent orphaned files on partial failure.
+    /// Save the transcript's `.txt` and `.json` artifacts — inside the
+    /// session folder for folder recordings, alongside the file for legacy
+    /// flat recordings. Uses atomic writes so a partially written
+    /// transcript.json never exists on disk (its presence marks a session
+    /// as transcribed).
     func save() throws {
-        let basePath = recordingURL.deletingPathExtension()
-        let txtURL = basePath.appendingPathExtension("txt")
-        let jsonURL = basePath.appendingPathExtension("json")
+        let artifacts = RecordingArtifacts(recordingURL: recordingURL)
+        let txtURL = artifacts.transcriptText
+        let jsonURL = artifacts.transcriptJSON
         
         // Write JSON first (more likely to fail due to encoding issues)
         do {

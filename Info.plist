@@ -17,10 +17,10 @@
     <key>CFBundleShortVersionString</key>
     <string>1.0.0</string>
     <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
+    <string>15.0</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>EchoNotes needs microphone access to record your voice.</string>
-    <key>NSScreenCaptureUsageDescription</key>
-    <string>EchoNotes needs Screen Recording permission to capture system audio (audio only — no video is recorded).</string>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>EchoNotes records system audio to capture the other side of your meetings. Audio only — no video is recorded.</string>
 </dict>
 </plist>

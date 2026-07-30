@@ -4,14 +4,15 @@ import AppKit
 import AVFoundation
 import os
 
-/// Central recording engine — coordinates system audio + mic capture and writes to file.
+/// Central recording engine — coordinates a RecordingSession (mic + system
+/// tracks) and surfaces state to the UI.
 ///
 /// **Error Handling Strategy:**
 /// - **Audio capture layer** (SystemAudioCapture, MicrophoneCapture): Uses closures (`onError`)
 ///   to propagate errors asynchronously from background threads.
-/// - **Recording engine**: Surfaces errors via `@Published var errorMessage` for UI binding.
+/// - **Recording engine**: Surfaces errors via the observable `errorMessage` for UI binding.
 /// - **Transcription layer**: Uses throwing functions for synchronous errors, publishes async
-///   errors via TranscriptionManager's `@Published var error`.
+///   errors via TranscriptionManager's observable `error`.
 ///
 /// This mixed approach matches the concurrency model: audio callbacks need async propagation,
 /// while engine state changes are published to UI observers, and transcription operations
@@ -42,11 +43,11 @@ final class RecordingEngine {
     var selectedSystemSourceId: String = UserDefaults.standard.string(forKey: "selectedSystemSource") ?? "" {
         didSet { UserDefaults.standard.set(selectedSystemSourceId, forKey: "selectedSystemSource") }
     }
-    
+
     var availableSources: [String] {
         MicrophoneCapture.availableDevices()
     }
-    
+
     var availableSystemSources: [String] {
         SystemAudioCapture.availableDevices()
     }
@@ -58,9 +59,7 @@ final class RecordingEngine {
 
     let transcriptionManager = TranscriptionManager()
 
-    @ObservationIgnored private let systemCapture = SystemAudioCapture()
-    @ObservationIgnored private let micCapture = MicrophoneCapture()
-    @ObservationIgnored private var audioWriter: AudioFileWriter?
+    @ObservationIgnored private var session: RecordingSession?
     @ObservationIgnored private var durationTimer: Timer?
     @ObservationIgnored private var recordingStartTime: Date?
     @ObservationIgnored private var pauseStartTime: Date?
@@ -72,14 +71,6 @@ final class RecordingEngine {
     @ObservationIgnored private var sleepObserver: NSObjectProtocol?
     @ObservationIgnored private var wakeObserver: NSObjectProtocol?
 
-    /// Reusable DateFormatter for recording filenames. Static to avoid repeated allocation.
-    private static let recordingTimestampFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        formatter.timeZone = TimeZone.current
-        return formatter
-    }()
-
     /// Save location for recordings. Directory validation happens in startRecording().
     var saveDirectory: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
@@ -89,10 +80,8 @@ final class RecordingEngine {
     func startRecording() async {
         guard !isRecording else { return }
         errorMessage = nil
-        // Clear any previous microphone warnings
-        micCapture.clearWarning()
 
-        // Check permissions
+        // Check permissions (microphone; system audio prompts at tap creation)
         if let permissionError = await PermissionChecker.checkPermissionsWithMessage() {
             errorMessage = permissionError
             return
@@ -118,28 +107,24 @@ final class RecordingEngine {
             logger.warning("Could not check disk space: \(error.localizedDescription)")
         }
 
-        // Create output file with local timezone timestamp
-        let timestamp = Self.recordingTimestampFormatter.string(from: Date())
-        let filename = "recording-\(timestamp).m4a"
-        let fileURL = saveDirectory.appendingPathComponent(filename)
+        // Set up live transcription if enabled
+        let isLive = transcriptionMode == .live
+        if isLive {
+            do {
+                try await transcriptionManager.prepareForLiveTranscription()
+                transcriptionManager.streamingTranscriber.reset()
+            } catch {
+                errorMessage = "Failed to prepare live transcription: \(error.localizedDescription)"
+                return
+            }
+        }
 
         do {
-            // Set up audio file writer (M4A/AAC, 48kHz stereo — system L, mic R)
-            let writer = try AudioFileWriter(outputURL: fileURL, sampleRate: AudioConfig.sampleRate, channels: 2) { [weak self] error in
-                Task { @MainActor in
-                    guard let self, self.isRecording else { return }
-                    self.errorMessage = "Recording error: \(error.localizedDescription)"
-                    await self.stopRecording()
-                }
-            }
-
-            audioWriter = writer
-
-            // Clear any previous microphone warnings
-            micCapture.clearWarning()
+            let newSession = try RecordingSession(root: saveDirectory)
+            newSession.mic.clearWarning()
 
             // Surface audio capture errors to the UI
-            systemCapture.onError = { [weak self] error in
+            newSession.system.onError = { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.isRecording else { return }
                     self.errorMessage = "System audio error: \(error.localizedDescription)"
@@ -147,7 +132,7 @@ final class RecordingEngine {
                 }
             }
 
-            micCapture.onError = { [weak self] error in
+            newSession.mic.onError = { [weak self] error in
                 Task { @MainActor in
                     guard let self, self.isRecording else { return }
                     self.errorMessage = "Microphone error: \(error.localizedDescription)"
@@ -157,7 +142,7 @@ final class RecordingEngine {
 
             // Surface microphone warnings (non-fatal, recording continues).
             // Don't overwrite existing errors with warnings.
-            micCapture.onWarning = { [weak self] warning in
+            newSession.mic.onWarning = { [weak self] warning in
                 Task { @MainActor in
                     if self?.errorMessage == nil {
                         self?.errorMessage = warning
@@ -165,45 +150,20 @@ final class RecordingEngine {
                 }
             }
 
-            // Set up live transcription if enabled
-            let isLive = transcriptionMode == .live
-            if isLive {
-                do {
-                    try await transcriptionManager.prepareForLiveTranscription()
-                    transcriptionManager.streamingTranscriber.reset()
-                } catch {
-                    errorMessage = "Failed to prepare live transcription: \(error.localizedDescription)"
-                    cleanup()
-                    return
-                }
-            }
+            try newSession.start()
 
-            // Start both captures BEFORE setting onBuffer callbacks
-            // This prevents partial failure states where system buffers feed a writer
-            // that's about to be finalized
-            try await systemCapture.startCapture(sampleRate: AudioConfig.sampleRate)
-            do {
-                try micCapture.startCapture(sampleRate: AudioConfig.sampleRate)
-            } catch {
-                // System capture already started — must stop it before bailing
-                await systemCapture.stopCapture()
-                throw error
-            }
-
-            // Capture references for use in audio callbacks. These callbacks fire on
-            // background threads (ScreenCaptureKit / AVAudioEngine). Accessing them
-            // through `self` would hit the @MainActor executor check and crash.
-            // Both types use internal locking and are safe to call from any thread.
-            let writerRef = writer
+            // Capture references for use in audio callbacks. These callbacks
+            // fire on background threads (Core Audio / AVAudioEngine), so they
+            // must not touch @MainActor state directly.
             let transcriberRef = isLive ? transcriptionManager.streamingTranscriber : nil
             let systemLevelUpdateGate = self.systemLevelUpdateGate
             let micLevelUpdateGate = self.micLevelUpdateGate
             systemLevelUpdateGate.withLock { $0 = .distantPast }
             micLevelUpdateGate.withLock { $0 = .distantPast }
 
-            // Now that both captures are running, set up buffer callbacks
-            systemCapture.onBuffer = { [weak self] buffer in
-                writerRef.writeSystemBuffer(buffer)
+            // Recorders write their own files; these callbacks only drive
+            // level meters and live transcription.
+            newSession.system.onBuffer = { [weak self] buffer in
                 transcriberRef?.feedSamples(buffer.samples)
                 let now = Date()
                 guard RecordingEngine.shouldScheduleLevelUpdate(using: systemLevelUpdateGate, at: now) else { return }
@@ -216,8 +176,7 @@ final class RecordingEngine {
                 }
             }
 
-            micCapture.onBuffer = { [weak self] buffer in
-                writerRef.writeMicBuffer(buffer)
+            newSession.mic.onBuffer = { [weak self] buffer in
                 let now = Date()
                 guard RecordingEngine.shouldScheduleLevelUpdate(using: micLevelUpdateGate, at: now) else { return }
                 let level = SourcedAudioBuffer.rmsLevel(buffer.samples)
@@ -229,12 +188,13 @@ final class RecordingEngine {
                 }
             }
 
-            lastRecordingURL = fileURL
+            session = newSession
+            lastRecordingURL = newSession.dir
             recordingStartTime = Date()
             isRecording = true
             installSleepWakeObservers()
-            logger.info("Recording started: \(fileURL.lastPathComponent)")
-            debugLog.info("Recording started: \(fileURL.lastPathComponent)", category: "Recording")
+            logger.info("Recording started: \(newSession.dir.lastPathComponent)")
+            debugLog.info("Recording started: \(newSession.dir.lastPathComponent)", category: "Recording")
 
             // Duration timer — shows actual recording time (wall clock minus total pause time)
             durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -246,14 +206,13 @@ final class RecordingEngine {
             }
         } catch {
             errorMessage = "Failed to start recording: \(error.localizedDescription)"
-            audioWriter?.finalize()
             cleanup()
         }
     }
 
-    /// Pause recording — stops audio capture but keeps the file open for later resume.
+    /// Pause recording — stops audio capture but keeps both files open for resume.
     func pause() async {
-        guard isRecording && !isPaused else { return }
+        guard isRecording && !isPaused, let session else { return }
 
         logger.info("Pausing recording...")
         isPaused = true
@@ -263,9 +222,7 @@ final class RecordingEngine {
         durationTimer?.invalidate()
         durationTimer = nil
 
-        // Stop audio captures
-        await systemCapture.stopCapture()
-        micCapture.stopCapture()
+        session.pause()
 
         // Reset level meters
         systemLevel = 0
@@ -279,9 +236,17 @@ final class RecordingEngine {
 
     /// Resume recording — restarts audio capture, accumulates pause duration.
     func resume() async {
-        guard isRecording && isPaused else { return }
+        guard isRecording && isPaused, let session else { return }
 
         logger.info("Resuming recording...")
+
+        do {
+            try session.resume()
+        } catch {
+            logger.error("Failed to resume recording: \(error.localizedDescription)")
+            errorMessage = "Failed to resume recording: \(error.localizedDescription)"
+            return
+        }
 
         // Accumulate this pause cycle's duration
         if let pauseStart = pauseStartTime {
@@ -291,26 +256,6 @@ final class RecordingEngine {
         }
         isPaused = false
         pauseStartTime = nil
-
-        // Resume audio captures
-        // Note: onBuffer callbacks survive because they're set as properties on the
-        // capture objects, not on the SCStream/AVAudioEngine instances that get recreated.
-        do {
-            try await systemCapture.startCapture(sampleRate: AudioConfig.sampleRate)
-        } catch {
-            logger.error("Failed to resume system audio: \(error.localizedDescription)")
-            errorMessage = "Failed to resume system audio: \(error.localizedDescription)"
-            return
-        }
-
-        do {
-            try micCapture.startCapture(sampleRate: AudioConfig.sampleRate)
-        } catch {
-            logger.error("Failed to resume microphone: \(error.localizedDescription)")
-            errorMessage = "Failed to resume microphone: \(error.localizedDescription)"
-            await systemCapture.stopCapture()
-            return
-        }
 
         // Restart duration timer
         durationTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -328,21 +273,15 @@ final class RecordingEngine {
     }
 
     func stopRecording() async {
-        guard isRecording else { return }
+        guard isRecording, let session else { return }
 
         removeSleepWakeObservers()
         durationTimer?.invalidate()
         durationTimer = nil
 
-        // If currently paused, captures are already stopped — skip redundant stop calls
-        if !isPaused {
-            await systemCapture.stopCapture()
-            micCapture.stopCapture()
-        }
-        audioWriter?.finalize()
-
-        let url = audioWriter?.outputURL
         let recordedDuration = duration  // Capture before reset
+        session.stop(recordedDuration: recordedDuration)
+        let dir = session.dir
         cleanup()
 
         isRecording = false
@@ -354,20 +293,18 @@ final class RecordingEngine {
         micLevel = 0
         systemLevel = 0
 
-        if let url {
-            lastRecordingURL = url
-            logger.info("Recording stopped: \(url.lastPathComponent), duration: \(String(format: "%.1f", recordedDuration))s")
-            debugLog.info("Recording stopped: \(url.lastPathComponent) (\(String(format: "%.1f", recordedDuration))s)", category: "Recording")
+        lastRecordingURL = dir
+        logger.info("Recording stopped: \(dir.lastPathComponent), duration: \(String(format: "%.1f", recordedDuration))s")
+        debugLog.info("Recording stopped: \(dir.lastPathComponent) (\(String(format: "%.1f", recordedDuration))s)", category: "Recording")
 
-            if transcriptionMode == .live {
-                // Finalize live transcription — flush remaining chunks
-                await transcriptionManager.finalizeLiveTranscription(recordingURL: url)
-            } else {
-                transcriptionManager.reset()
-                // Auto-transcribe if enabled (post-recording mode)
-                if autoTranscribe {
-                    Task { await transcriptionManager.transcribe(audioURL: url) }
-                }
+        if transcriptionMode == .live {
+            // Finalize live transcription — flush remaining chunks
+            await transcriptionManager.finalizeLiveTranscription(recordingURL: dir)
+        } else {
+            transcriptionManager.reset()
+            // Auto-transcribe if enabled (post-recording mode)
+            if autoTranscribe {
+                transcriptionManager.enqueue(dir)
             }
         }
     }
@@ -422,7 +359,7 @@ final class RecordingEngine {
     }
 
     private func cleanup() {
-        audioWriter = nil
+        session = nil
         recordingStartTime = nil
     }
 

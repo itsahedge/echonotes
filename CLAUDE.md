@@ -9,7 +9,7 @@ If the build fails, fix it before committing. Do not push broken code and fix it
 ## Project Structure
 
 - **Language:** Swift (SwiftPM, not Xcode project)
-- **Platform:** macOS 14+ menu bar app (`LSUIElement = true`)
+- **Platform:** macOS 15+ desktop app (windowed, not menu bar)
 - **Build:** `./scripts/build-app.sh` (release build + app bundle)
 - **Tests:** `swift test`
 

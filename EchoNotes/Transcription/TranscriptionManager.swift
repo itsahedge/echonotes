@@ -211,6 +211,90 @@ final class TranscriptionManager {
         error = "Transcription cancelled."
     }
 
+    // MARK: - Transcription queue
+
+    @ObservationIgnored private var pendingTranscriptions: [URL] = []
+    @ObservationIgnored private var isDrainingQueue = false
+
+    /// Queue a recording for transcription. Jobs run one at a time, in order;
+    /// a failure logs and never blocks later jobs.
+    func enqueue(_ url: URL) {
+        guard !pendingTranscriptions.contains(url) else { return }
+        pendingTranscriptions.append(url)
+        drainQueueIfIdle()
+    }
+
+    /// The filesystem is the queue: a session folder with meta.json but no
+    /// transcript.json finished recording but was never transcribed (app quit
+    /// or crashed mid-job). Re-queue those on launch.
+    func resumePendingSessions(in root: URL) {
+        let pending = Self.findPendingSessions(in: root)
+        guard !pending.isEmpty else { return }
+        logger.info("Resuming \(pending.count) untranscribed session(s)")
+        debugLog.info("Resuming \(pending.count) untranscribed session(s)", category: "Transcription")
+        for dir in pending {
+            enqueue(dir)
+        }
+    }
+
+    /// Session folders under `root` that completed recording (meta.json
+    /// exists) but have no transcript.json. Sorted oldest-first (folder names
+    /// sort chronologically).
+    nonisolated static func findPendingSessions(in root: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [.isDirectoryKey]
+        ) else { return [] }
+
+        return entries
+            .filter { url in
+                let isDirectory = (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+                return isDirectory
+                    && fm.fileExists(atPath: SessionMeta.url(in: url).path)
+                    && !fm.fileExists(atPath: RecordingArtifacts(recordingURL: url).transcriptJSON.path)
+            }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    /// Build the track list for a session folder. Offsets come from
+    /// meta.json; a session that crashed before meta was written still
+    /// transcribes, with zero offsets (tracks start within tens of
+    /// milliseconds of each other anyway).
+    nonisolated static func sessionTracks(for dir: URL) -> [WhisperEngine.SessionTrack] {
+        let meta = try? SessionMeta.read(from: dir)
+        let fm = FileManager.default
+
+        func track(named name: String, fallback: String, speaker: Speaker) -> WhisperEngine.SessionTrack? {
+            let filename = meta?.files[name] ?? fallback
+            let url = dir.appendingPathComponent(filename)
+            guard fm.fileExists(atPath: url.path) else { return nil }
+            let offsetMs = meta?.startOffsetMs[name] ?? 0
+            return WhisperEngine.SessionTrack(
+                url: url,
+                speaker: speaker,
+                startOffset: TimeInterval(offsetMs) / 1000
+            )
+        }
+
+        return [
+            track(named: SessionMeta.systemTrack, fallback: RecordingSession.systemFilename, speaker: .remote),
+            track(named: SessionMeta.micTrack, fallback: RecordingSession.micFilename, speaker: .user),
+        ].compactMap { $0 }
+    }
+
+    private func drainQueueIfIdle() {
+        guard !isDrainingQueue else { return }
+        isDrainingQueue = true
+        Task {
+            while !pendingTranscriptions.isEmpty {
+                let next = pendingTranscriptions.removeFirst()
+                await transcribe(audioURL: next)
+            }
+            isDrainingQueue = false
+        }
+    }
+
     /// Transcribe an audio file end-to-end.
     func transcribe(audioURL: URL) async {
         guard !isTranscribing else { return }
@@ -231,9 +315,23 @@ final class TranscriptionManager {
 
                 try Task.checkCancellation()
 
-                let segments = try await engine.transcribeDiarized(audioURL: audioURL) { [weak self] progress in
-                    Task { @MainActor in
-                        self?.progress = progress
+                let segments: [TranscriptSegment]
+                if RecordingArtifacts.isSessionDirectory(audioURL) {
+                    // Session folder: transcribe mic/system tracks separately
+                    // and merge by offset-aligned timestamps.
+                    segments = try await engine.transcribeSession(
+                        tracks: Self.sessionTracks(for: audioURL)
+                    ) { [weak self] progress in
+                        Task { @MainActor in
+                            self?.progress = progress
+                        }
+                    }
+                } else {
+                    // Legacy flat recording: stereo channel-split diarization.
+                    segments = try await engine.transcribeDiarized(audioURL: audioURL) { [weak self] progress in
+                        Task { @MainActor in
+                            self?.progress = progress
+                        }
                     }
                 }
 
@@ -301,14 +399,12 @@ final class TranscriptionManager {
 
             let result = try await service.summarize(transcript: transcript.toPlainText(), config: config, knowledgeBaseContext: kbContext)
 
-            // Save as .md alongside the recording
-            let mdURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("md")
-            try result.toMarkdown().write(to: mdURL, atomically: true, encoding: .utf8)
+            // Save markdown + JSON next to the recording's other artifacts
+            let artifacts = RecordingArtifacts(recordingURL: transcript.recordingURL)
+            try result.toMarkdown().write(to: artifacts.summaryMarkdown, atomically: true, encoding: .utf8)
 
-            // Save as .summary.json so RecordingDetailView can load it
-            let jsonURL = transcript.recordingURL.deletingPathExtension().appendingPathExtension("summary.json")
             let encoded = try JSONEncoder().encode(result)
-            try encoded.write(to: jsonURL, options: .atomic)
+            try encoded.write(to: artifacts.summaryJSON, options: .atomic)
 
             debugLog.info("Summary generated successfully", category: "AI")
             self.summary = result

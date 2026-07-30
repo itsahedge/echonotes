@@ -2,324 +2,255 @@
 import AppKit
 import os
 
-/// Captures microphone audio using AVAudioEngine.
-/// Outputs mono Float32 PCM at the requested sample rate.
-/// Handles microphone disconnection gracefully by continuing to capture with silence.
+/// Captures the default microphone via AVAudioEngine, downmixing to 48kHz
+/// mono and streaming AAC into a CAF file.
+///
+/// A fresh AVAudioEngine is built for every capture start and resume —
+/// reusing one engine across sleep/wake or device changes leaves it holding
+/// stale hardware references, which caused post-sleep crashes in earlier
+/// builds.
+///
+/// If the device disappears mid-recording, timed silence is written so this
+/// track's timeline stays aligned with the system track; capture recovers
+/// automatically when a device returns.
 final class MicrophoneCapture: @unchecked Sendable {
+    /// 48kHz mono samples for level metering. Called off the main thread.
     var onBuffer: ((SourcedAudioBuffer) -> Void)?
+    /// Called once on the first unrecoverable file-write error.
     var onError: ((Error) -> Void)?
+    /// Non-fatal problems (device missing/disconnected); recording continues.
     var onWarning: ((String) -> Void)?
     var hasWarning: Bool { _hasWarning.withLock { $0 } }
-    
+
+    /// Wall-clock time of the first captured buffer — the track's true start,
+    /// used to offset-align the two tracks' transcript timestamps.
+    var firstBufferAt: Date? { _firstBufferAt.withLock { $0 } }
+
     static func availableDevices() -> [String] {
-        // Return default microphone or empty array
-        // macOS audio device enumeration requires AudioToolbox
-        return []
+        // Device selection not implemented — the default input is used.
+        []
     }
 
     func clearWarning() {
         _hasWarning.withLock { $0 = false }
     }
 
-    private var engine = AVAudioEngine()
+    private var engine: AVAudioEngine?
+    /// Guards `file`, `converter`, and `targetFormat` across the render
+    /// thread, the silence timer queue, and the main thread.
     private let lock = NSLock()
+    private var file: AVAudioFile?
     private var converter: AVAudioConverter?
     private var targetFormat: AVAudioFormat?
-    private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
-    private let _hasWarning = OSAllocatedUnfairLock(initialState: false)
-    private let _isDisconnected = OSAllocatedUnfairLock(initialState: false)
-    private let _pendingResume = OSAllocatedUnfairLock(initialState: false)
-    private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
     private var configObserver: NSObjectProtocol?
     private var silenceTimer: DispatchSourceTimer?
-    private var sleepObserver: NSObjectProtocol?
-    private var wakeObserver: NSObjectProtocol?
-    private var capturedSampleRate: Double = AudioConfig.sampleRate
 
-    func startCapture(sampleRate: Double = AudioConfig.sampleRate) throws {
+    private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
+    private let _isPaused = OSAllocatedUnfairLock(initialState: false)
+    private let _hasWarning = OSAllocatedUnfairLock(initialState: false)
+    private let _isDisconnected = OSAllocatedUnfairLock(initialState: false)
+    private let _firstBufferAt = OSAllocatedUnfairLock<Date?>(initialState: nil)
+    private let _writeFailed = OSAllocatedUnfairLock(initialState: false)
+    private let logger = Logger(subsystem: "com.echonotes", category: "MicrophoneCapture")
+
+    /// Start capturing the mic into `url` (use a .caf extension).
+    func start(writingTo url: URL) throws {
         guard _isCapturing.withLock({ !$0 }) else { return }
-        capturedSampleRate = sampleRate
-        installSleepWakeObservers()
+        _firstBufferAt.withLock { $0 = nil }
+        _writeFailed.withLock { $0 = false }
 
-        let fmt = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sampleRate, channels: 1, interleaved: false)!
+        guard let target = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: AudioConfig.sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw MicrophoneError.converterCreationFailed
+        }
 
-        // Store target format early for future recovery attempts
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: target.sampleRate,
+            AVNumberOfChannelsKey: 1,
+        ]
+        let newFile: AVAudioFile
+        do {
+            newFile = try AVAudioFile(
+                forWriting: url,
+                settings: settings,
+                commonFormat: target.commonFormat,
+                interleaved: target.isInterleaved
+            )
+        } catch {
+            throw MicrophoneError.fileCreationFailed(error)
+        }
+
         lock.lock()
-        targetFormat = fmt
+        file = newFile
+        targetFormat = target
         lock.unlock()
 
-        let inputNode = engine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-
-        // No input device — start in disconnected state with silence feed
-        if inputFormat.sampleRate <= 0 {
-            _hasWarning.withLock { $0 = true }
-            _isDisconnected.withLock { $0 = true }
-            _isCapturing.withLock { $0 = true }
-            logger.warning("No microphone input device - recording will continue with system audio only")
-            onWarning?("No microphone input device - recording will continue with system audio only")
-            startSilenceFeed()
-            return
+        do {
+            try attachEngine()
+        } catch {
+            lock.lock()
+            file = nil
+            targetFormat = nil
+            lock.unlock()
+            throw error
         }
-
-        let conv = AVAudioConverter(from: inputFormat, to: fmt)
-        guard conv != nil else { throw MicrophoneError.converterCreationFailed }
-
-        lock.lock()
-        converter = conv
-        lock.unlock()
-
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
-            self?.processBuffer(buffer)
-        }
-
-        // Monitor for configuration changes (device disconnect, etc.)
-        configObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: engine,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            self.handleConfigurationChange()
-        }
-
-        engine.prepare()
-        try engine.start()
         _isCapturing.withLock { $0 = true }
     }
 
+    /// Tear the engine down but keep the file open — resumable.
+    func pauseCapture() {
+        guard _isCapturing.withLock({ $0 }), _isPaused.withLock({ !$0 }) else { return }
+        _isPaused.withLock { $0 = true }
+        tearDownEngine()
+    }
+
+    /// Rebuild a fresh engine after a pause. Falls back to the silence feed
+    /// (with a warning) if no input device is available.
+    func resumeCapture() throws {
+        guard _isCapturing.withLock({ $0 }), _isPaused.withLock({ $0 }) else { return }
+        _isPaused.withLock { $0 = false }
+        try attachEngine()
+    }
+
+    /// Stop capturing and close the file. Idempotent.
     func stopCapture() {
         guard _isCapturing.withLock({ $0 }) else { return }
-
         _isCapturing.withLock { $0 = false }
-        _pendingResume.withLock { $0 = false }
-        removeSleepWakeObservers()
-
-        if let observer = configObserver {
-            NotificationCenter.default.removeObserver(observer)
-            configObserver = nil
-        }
-
-        // Stop silence timer if running
-        if _isDisconnected.withLock({ $0 }) {
-            silenceTimer?.cancel()
-            silenceTimer = nil
-            _isDisconnected.withLock { $0 = false }
-        }
-
-        guard engine.isRunning else {
-            lock.lock()
-            converter = nil
-            targetFormat = nil
-            lock.unlock()
-            return
-        }
-
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        _isPaused.withLock { $0 = false }
+        tearDownEngine()
 
         lock.lock()
-        converter = nil
+        file = nil
         targetFormat = nil
         lock.unlock()
     }
 
-    // MARK: - Configuration Change Handler
+    // MARK: - Engine lifecycle
 
-    private func handleConfigurationChange() {
-        // Check if we're still capturing and engine stopped
-        let wasCapturing = _isCapturing.withLock { current -> Bool in
-            guard current else { return false }
-            if !engine.isRunning {
-                current = false
-                return true
-            }
-            return false
-        }
+    /// Build a fresh engine + converter and start capture, or enter the
+    /// silence-feed state when no input device exists.
+    private func attachEngine() throws {
+        let newEngine = AVAudioEngine()
+        let input = newEngine.inputNode
+        let inputFormat = input.outputFormat(forBus: 0)
 
-        guard wasCapturing else { return }
-
-        // If already disconnected, try to recover (new device plugged in)
-        if _isDisconnected.withLock({ $0 }) {
-            attemptRecovery()
+        // No input device — keep the track's timeline advancing with silence.
+        guard inputFormat.sampleRate > 0 else {
+            engine = newEngine
+            enterDisconnectedState(
+                warning: "No microphone input device - recording will continue with system audio only"
+            )
             return
         }
 
-        // Engine stopped — attempt to restart with new/changed device
-        logger.info("Microphone configuration changed, attempting to recover...")
-
-        // Remove existing tap before restart
-        engine.inputNode.removeTap(onBus: 0)
-
-        // Try to restart
-        if attemptRestart() {
-            logger.info("Microphone recovered - now using new device")
-            _hasWarning.withLock { $0 = false }
-        } else {
-            logger.warning("Failed to restart microphone - falling back to silence")
-            handleDisconnection()
-        }
-    }
-
-    // MARK: - Recovery Logic
-
-    /// Attempts to restart the engine with the current input device.
-    /// - Returns: true if restart succeeded
-    private func attemptRestart() -> Bool {
-        let deviceFormat = engine.inputNode.outputFormat(forBus: 0)
-        guard deviceFormat.sampleRate > 0 else { return false }
-
-        // Get target format (safe unwrap — set in startCapture before any path)
         lock.lock()
-        guard let target = targetFormat else {
-            lock.unlock()
-            return false
-        }
+        let target = targetFormat
         lock.unlock()
-
-        let conv = AVAudioConverter(from: deviceFormat, to: target)
-        guard conv != nil else { return false }
+        guard let target, let conv = AVAudioConverter(from: inputFormat, to: target) else {
+            throw MicrophoneError.converterCreationFailed
+        }
 
         lock.lock()
         converter = conv
         lock.unlock()
 
-        // Reinstall tap with new format
-        engine.inputNode.installTap(onBus: 0, bufferSize: 4096, format: deviceFormat) { [weak self] buffer, _ in
+        input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             self?.processBuffer(buffer)
         }
 
-        // Restart engine
-        do {
-            engine.prepare()
-            try engine.start()
-            return true
-        } catch {
-            logger.warning("Failed to restart engine: \(error.localizedDescription)")
-            // Clean up tap if engine failed to start
-            engine.inputNode.removeTap(onBus: 0)
-            return false
+        configObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: newEngine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.handleConfigurationChange()
         }
+
+        newEngine.prepare()
+        do {
+            try newEngine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            removeConfigObserver()
+            lock.lock()
+            converter = nil
+            lock.unlock()
+            throw error
+        }
+        engine = newEngine
+        _isDisconnected.withLock { $0 = false }
     }
 
-    /// Attempts to recover from disconnection state when a new device appears
-    private func attemptRecovery() {
-        // Stop silence feed temporarily
+    /// Stop the engine and all supporting machinery. Leaves the file alone.
+    private func tearDownEngine() {
+        removeConfigObserver()
         silenceTimer?.cancel()
         silenceTimer = nil
+        _isDisconnected.withLock { $0 = false }
 
-        // Remove any leftover tap
-        engine.inputNode.removeTap(onBus: 0)
+        if let engine {
+            engine.inputNode.removeTap(onBus: 0)
+            if engine.isRunning {
+                engine.stop()
+            }
+        }
+        engine = nil
 
-        if attemptRestart() {
-            _isDisconnected.withLock { $0 = false }
-            _hasWarning.withLock { $0 = false }
-            logger.info("Microphone recovered - recording resumed with new device")
-        } else {
-            // Still no device — restart silence feed
-            startSilenceFeed()
+        lock.lock()
+        converter = nil
+        lock.unlock()
+    }
+
+    private func removeConfigObserver() {
+        if let observer = configObserver {
+            NotificationCenter.default.removeObserver(observer)
+            configObserver = nil
         }
     }
 
-    /// Handles disconnection by starting silence feed
-    private func handleDisconnection() {
-        guard !_isDisconnected.withLock({ $0 }) else { return }
+    // MARK: - Device change handling
 
+    /// The engine's I/O configuration changed (device unplugged, switched,
+    /// or reappeared). Rebuild from scratch — a fresh engine is the only
+    /// reliable way back to a good state.
+    private func handleConfigurationChange() {
+        guard _isCapturing.withLock({ $0 }), _isPaused.withLock({ !$0 }) else { return }
+        logger.info("Microphone configuration changed, rebuilding engine...")
+
+        tearDownEngine()
+        do {
+            try attachEngine()
+            if !_isDisconnected.withLock({ $0 }) {
+                _hasWarning.withLock { $0 = false }
+                logger.info("Microphone recovered — capture rebuilt with current device")
+            }
+        } catch {
+            logger.warning("Failed to rebuild microphone capture: \(error.localizedDescription)")
+            enterDisconnectedState(
+                warning: "Microphone unavailable - recording will continue with system audio only"
+            )
+        }
+    }
+
+    private func enterDisconnectedState(warning: String) {
+        guard !_isDisconnected.withLock({ $0 }) else { return }
         _isDisconnected.withLock { $0 = true }
         _hasWarning.withLock { $0 = true }
-
-        logger.warning("Microphone unavailable - recording will continue with system audio only")
-        onWarning?("Microphone unavailable - recording will continue with system audio only")
-
+        logger.warning("\(warning)")
+        onWarning?(warning)
         startSilenceFeed()
     }
 
-    // MARK: - Sleep/Wake Handling
+    // MARK: - Silence feed
 
-    /// Tear down the AVAudioEngine before sleep to prevent stale hardware references.
-    /// On wake, create a fresh engine and restart capture if we were active.
-    private func installSleepWakeObservers() {
-        guard sleepObserver == nil else { return }
-        let workspace = NSWorkspace.shared.notificationCenter
-
-        sleepObserver = workspace.addObserver(
-            forName: NSWorkspace.willSleepNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            let wasCapturing = self._isCapturing.withLock { $0 }
-            guard wasCapturing else { return }
-            self.logger.info("System going to sleep — tearing down AVAudioEngine")
-            self._pendingResume.withLock { $0 = true }
-            self._isCapturing.withLock { $0 = false }
-
-            // Remove config observer to prevent spurious change notifications during sleep
-            if let observer = self.configObserver {
-                NotificationCenter.default.removeObserver(observer)
-                self.configObserver = nil
-            }
-
-            // Stop silence timer if in disconnected mode
-            if self._isDisconnected.withLock({ $0 }) {
-                self.silenceTimer?.cancel()
-                self.silenceTimer = nil
-            }
-
-            // Tear down the engine to prevent stale audio hardware references
-            if self.engine.isRunning {
-                self.engine.inputNode.removeTap(onBus: 0)
-                self.engine.stop()
-            }
-
-            self.lock.lock()
-            self.converter = nil
-            self.lock.unlock()
-        }
-
-        wakeObserver = workspace.addObserver(
-            forName: NSWorkspace.didWakeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            guard self._pendingResume.withLock({ $0 }) else { return }
-            self.logger.info("System woke up — recreating AVAudioEngine")
-            self._pendingResume.withLock { $0 = false }
-            self._isDisconnected.withLock { $0 = false }
-
-            // Replace the engine with a fresh instance to avoid stale hardware state
-            self.engine = AVAudioEngine()
-
-            // Brief delay for the audio subsystem to stabilize after wake
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                guard let self else { return }
-                do {
-                    try self.startCapture(sampleRate: self.capturedSampleRate)
-                } catch {
-                    self.logger.error("Failed to resume microphone after wake: \(error.localizedDescription)")
-                    self.onError?(error)
-                }
-            }
-        }
-    }
-
-    private func removeSleepWakeObservers() {
-        let workspace = NSWorkspace.shared.notificationCenter
-        if let observer = sleepObserver {
-            workspace.removeObserver(observer)
-            sleepObserver = nil
-        }
-        if let observer = wakeObserver {
-            workspace.removeObserver(observer)
-            wakeObserver = nil
-        }
-    }
-
-    // MARK: - Silence Feed
-
-    /// Starts feeding silence buffers to onBuffer to keep stereo file synchronized.
-    /// Uses DispatchSourceTimer for precise timing independent of RunLoop.
+    /// Feeds timed silence into the file and level meter while no device is
+    /// available, so the mic track's timeline stays aligned with the system
+    /// track. Uses DispatchSourceTimer for timing independent of the RunLoop.
     private func startSilenceFeed() {
         let bufferSize = 4096
         let intervalMs = 85 // ~4096 samples at 48kHz ≈ 85ms per chunk
@@ -327,24 +258,55 @@ final class MicrophoneCapture: @unchecked Sendable {
         let timer = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
         timer.schedule(deadline: .now(), repeating: .milliseconds(intervalMs), leeway: .milliseconds(5))
         timer.setEventHandler { [weak self] in
-            guard let self, self._isCapturing.withLock({ $0 }) else { return }
-            let silence = Array(repeating: Float(0.0), count: bufferSize)
-            self.onBuffer?(SourcedAudioBuffer(samples: silence, source: .microphone))
+            guard let self,
+                  self._isDisconnected.withLock({ $0 }),
+                  !self._isPaused.withLock({ $0 })
+            else { return }
+
+            self.lock.lock()
+            let file = self.file
+            let target = self.targetFormat
+            self.lock.unlock()
+            guard let file, let target else { return }
+
+            self._firstBufferAt.withLock { if $0 == nil { $0 = Date() } }
+
+            if let silence = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: AVAudioFrameCount(bufferSize)) {
+                silence.frameLength = AVAudioFrameCount(bufferSize)
+                // Buffers start zero-filled; write as-is.
+                do {
+                    try file.write(from: silence)
+                } catch {
+                    self.reportWriteFailure(error)
+                    return
+                }
+            }
+            self.onBuffer?(SourcedAudioBuffer(
+                samples: [Float](repeating: 0, count: bufferSize),
+                source: .microphone
+            ))
         }
         timer.resume()
         silenceTimer = timer
     }
 
-    // MARK: - Buffer Processing
+    // MARK: - Buffer processing (render thread)
 
     private func processBuffer(_ buffer: AVAudioPCMBuffer) {
-        lock.lock()
-        guard let converter, let targetFormat else { lock.unlock(); return }
-        lock.unlock()
+        guard !_writeFailed.withLock({ $0 }) else { return }
 
-        let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-        let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio)
-        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else { return }
+        lock.lock()
+        let converter = self.converter
+        let target = self.targetFormat
+        let file = self.file
+        lock.unlock()
+        guard let converter, let target, let file else { return }
+
+        let ratio = target.sampleRate / buffer.format.sampleRate
+        let outputFrameCount = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
+        guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: outputFrameCount) else {
+            return
+        }
 
         var error: NSError?
         let didProvideInput = OSAllocatedUnfairLock(initialState: false)
@@ -354,7 +316,6 @@ final class MicrophoneCapture: @unchecked Sendable {
                 hasProvidedInput = true
                 return true
             }
-
             if shouldProvideInput {
                 outStatus.pointee = .haveData
                 return buffer
@@ -362,26 +323,45 @@ final class MicrophoneCapture: @unchecked Sendable {
             outStatus.pointee = .noDataNow
             return nil
         }
-
         if let error {
             logger.error("Mic audio conversion error: \(error.localizedDescription)")
             return
         }
-        guard let channelData = outputBuffer.floatChannelData else { return }
 
+        _firstBufferAt.withLock { if $0 == nil { $0 = Date() } }
+
+        do {
+            try file.write(from: outputBuffer)
+        } catch {
+            reportWriteFailure(error)
+            return
+        }
+
+        guard onBuffer != nil, let channelData = outputBuffer.floatChannelData else { return }
         let samples = Array(UnsafeBufferPointer(start: channelData[0], count: Int(outputBuffer.frameLength)))
-
         onBuffer?(SourcedAudioBuffer(samples: samples, source: .microphone))
+    }
+
+    private func reportWriteFailure(_ error: Error) {
+        let firstFailure = _writeFailed.withLock { failed -> Bool in
+            guard !failed else { return false }
+            failed = true
+            return true
+        }
+        guard firstFailure else { return }
+        logger.error("Mic track write failed: \(error.localizedDescription)")
+        onError?(error)
     }
 }
 
 enum MicrophoneError: LocalizedError {
-    case noInputDevice, converterCreationFailed, deviceDisconnected
+    case converterCreationFailed
+    case fileCreationFailed(Error)
+
     var errorDescription: String? {
         switch self {
-        case .noInputDevice: return "No microphone found."
         case .converterCreationFailed: return "Failed to create audio converter."
-        case .deviceDisconnected: return "Microphone disconnected during recording."
+        case .fileCreationFailed(let e): return "Failed to create the mic audio file: \(e.localizedDescription)"
         }
     }
 }
