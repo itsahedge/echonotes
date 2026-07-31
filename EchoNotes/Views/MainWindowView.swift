@@ -380,7 +380,7 @@ struct MainWindowView: View {
 
             Button(action: {
                 guard let url = recorder.lastRecordingURL else { return }
-                Task { await tm.transcribe(audioURL: url) }
+                tm.transcribe(audioURL: url)
             }) {
                 HStack {
                     Image(systemName: "text.bubble")

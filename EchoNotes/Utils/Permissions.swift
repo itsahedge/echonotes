@@ -1,10 +1,11 @@
 import AVFoundation
-import ScreenCaptureKit
 
-/// Checks and requests macOS permissions for mic + system audio recording.
+/// Checks and requests macOS permissions for recording.
 ///
-/// **Note:** "Screen Recording" permission is required to use ScreenCaptureKit's audio API.
-/// We use ScreenCaptureKit in AUDIO-ONLY mode — no video, screen, or visual data is captured.
+/// Only the microphone can be checked up front. System audio capture (Core
+/// Audio process tap) has no side-effect-free TCC query: macOS prompts once
+/// at first tap creation, and a denial surfaces as a descriptive error from
+/// SystemAudioCapture.start with remediation steps.
 struct PermissionChecker {
     private static func requestMicrophonePermission() async -> Bool {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -15,38 +16,15 @@ struct PermissionChecker {
         }
     }
 
-    private static func requestScreenRecordingPermission() async -> Bool {
-        do {
-            _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-            return true
-        } catch { return false }
-    }
-    
-    /// Check permissions individually and return a specific error message if any are missing.
+    /// Check permissions and return a specific error message if any are missing.
     static func checkPermissionsWithMessage() async -> String? {
-        let mic = await requestMicrophonePermission()
-        let screen = await requestScreenRecordingPermission()
-        
-        if !mic && !screen {
-            return """
-            EchoNotes needs Microphone and Screen Recording permissions.
-            
-            Enable them in: System Settings → Privacy & Security → Microphone & Screen Recording
-            """
-        } else if !mic {
+        guard await requestMicrophonePermission() else {
             return """
             EchoNotes needs Microphone permission.
-            
+
             Enable it in: System Settings → Privacy & Security → Microphone
             """
-        } else if !screen {
-            return """
-            EchoNotes needs Screen Recording permission (for system audio capture only — no video is recorded).
-            
-            Enable it in: System Settings → Privacy & Security → Screen Recording
-            """
         }
-        
         return nil
     }
 }

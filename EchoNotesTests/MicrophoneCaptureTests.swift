@@ -1,106 +1,87 @@
 import Testing
 import AVFoundation
+import os
 @testable import EchoNotes
 
 @Suite("MicrophoneCapture Tests")
 struct MicrophoneCaptureTests {
-    
+    let tempDir: URL
+
+    init() throws {
+        tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    }
+
     @Test("clearWarning resets warning state")
-    func clearWarningResetsState() async throws {
+    func clearWarningResetsState() {
         let capture = MicrophoneCapture()
-        
-        // Initially no warning
+
         #expect(!capture.hasWarning)
-        
-        // Simulate warning state by accessing internal lock
-        // (In real usage, this would be set by handlePermanentDisconnection)
-        // We can't directly test the private lock, but we can verify clearWarning doesn't crash
         capture.clearWarning()
         #expect(!capture.hasWarning)
     }
-    
-    @Test("startCapture handles missing device gracefully")
-    func startCaptureWithNoDevice() async throws {
+
+    @Test("start handles missing device gracefully")
+    func startWithNoDevice() async throws {
         let capture = MicrophoneCapture()
-        var warningReceived = false
-        
+        let received = OSAllocatedUnfairLock(initialState: false)
+
         capture.onWarning = { _ in
-            warningReceived = true
+            received.withLock { $0 = true }
         }
-        
-        // Start capture - if no device is available, it should enter disconnected state
-        // Note: This test behavior depends on system state
+
+        // If no device is available, capture enters the silence-feed state
+        // with a warning instead of failing. Either outcome (device found or
+        // warning) is valid depending on the test machine.
         do {
-            try capture.startCapture(sampleRate: 48000)
-            
-            // Give it a moment to initialize
-            try await Task.sleep(nanoseconds: 100_000_000) // 100ms
-            
-            // Clean up
+            try capture.start(writingTo: tempDir.appendingPathComponent("mic.caf"))
+            try await Task.sleep(for: .milliseconds(100))
             capture.stopCapture()
-            
-            // If warning was received, that's expected when no mic is available
-            // If not, that means a mic was found (also valid)
-            // Either way, no crash = success
         } catch {
-            // Error is also acceptable if device setup fails
             capture.stopCapture()
         }
     }
-    
-    @Test("stopCapture cleans up resources")
+
+    @Test("stopCapture cleans up and is idempotent")
     func stopCaptureCleansUp() async throws {
         let capture = MicrophoneCapture()
-        
-        // Start and stop multiple times to verify cleanup works
-        for _ in 0..<3 {
+
+        for i in 0..<3 {
             do {
-                try capture.startCapture(sampleRate: 48000)
-                try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                try capture.start(writingTo: tempDir.appendingPathComponent("mic-\(i).caf"))
+                try await Task.sleep(for: .milliseconds(50))
             } catch {
-                // Continue even if start fails
+                // Start can fail without a device or permission — still must clean up.
             }
             capture.stopCapture()
+            capture.stopCapture() // second call must be a no-op
         }
-        
-        // Should complete without crash
-        #expect(true)
     }
-    
-    @Test("onWarning callback is invoked")
-    func onWarningCallback() async throws {
+
+    @Test("pause before start is a no-op")
+    func pauseBeforeStart() {
         let capture = MicrophoneCapture()
-        var receivedWarning: String?
-        
-        capture.onWarning = { warning in
-            receivedWarning = warning
-        }
-        
-        // We can't directly trigger the warning without a real disconnection,
-        // but we can verify the callback slot is settable and clearWarning works
-        capture.clearWarning()
-        #expect(!capture.hasWarning)
-        
-        // Callback assignment doesn't crash = success
-        #expect(true)
+        capture.pauseCapture()
+        #expect(capture.firstBufferAt == nil)
     }
-    
-    @Test("multiple start/stop cycles don't leak state")
-    func multipleStartStopCycles() async throws {
+
+    @Test("start writes a readable CAF file")
+    func startCreatesFile() async throws {
         let capture = MicrophoneCapture()
-        
-        for i in 0..<5 {
-            do {
-                try capture.startCapture(sampleRate: 48000)
-                _ = i // Use variable to avoid unused warning
-                try await Task.sleep(nanoseconds: 25_000_000) // 25ms
-            } catch {
-                // Expected in some environments
-            }
-            capture.stopCapture()
+        let url = tempDir.appendingPathComponent("mic.caf")
+
+        do {
+            try capture.start(writingTo: url)
+        } catch {
+            // No device/permission in this environment — nothing to assert.
+            return
         }
-        
-        // Should complete without crash or state leak
-        #expect(true)
+        try await Task.sleep(for: .milliseconds(200))
+        capture.stopCapture()
+
+        #expect(FileManager.default.fileExists(atPath: url.path))
+        // CAF needs no finalization pass — the file must be readable as-is.
+        let file = try AVAudioFile(forReading: url)
+        #expect(file.processingFormat.channelCount == 1)
     }
 }

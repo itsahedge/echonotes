@@ -25,5 +25,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+
+        // The filesystem is the transcription queue: pick up sessions that
+        // finished recording but never got a transcript (quit or crash
+        // mid-job) — but only if the user wants automatic transcription.
+        if recorder.autoTranscribe && recorder.transcriptionMode == .postRecording {
+            recorder.transcriptionManager.resumePendingSessions(in: recorder.saveDirectory)
+        }
     }
 }

@@ -11,7 +11,7 @@ struct RecordingDetailView: View {
     @State private var summaryError: String?
 
     private var existingSummary: MeetingSummary? {
-        let jsonURL = entry.url.deletingPathExtension().appendingPathExtension("summary.json")
+        let jsonURL = RecordingArtifacts(recordingURL: entry.url).summaryJSON
         guard FileManager.default.fileExists(atPath: jsonURL.path),
               let data = try? Data(contentsOf: jsonURL),
               let result = try? JSONDecoder().decode(MeetingSummary.self, from: data) else {
@@ -52,7 +52,7 @@ struct RecordingDetailView: View {
                             .foregroundStyle(.tertiary)
 
                         Button(action: {
-                            Task { await tm.transcribe(audioURL: entry.url) }
+                            tm.transcribe(audioURL: entry.url)
                         }) {
                             HStack {
                                 Image(systemName: "text.bubble")
@@ -305,12 +305,11 @@ struct RecordingDetailView: View {
 
                 let result = try await service.summarize(transcript: text, config: config, knowledgeBaseContext: kbContext)
 
-                let mdURL = entry.url.deletingPathExtension().appendingPathExtension("md")
-                try result.toMarkdown().write(to: mdURL, atomically: true, encoding: .utf8)
+                let artifacts = RecordingArtifacts(recordingURL: entry.url)
+                try result.toMarkdown().write(to: artifacts.summaryMarkdown, atomically: true, encoding: .utf8)
 
-                let jsonSummaryURL = entry.url.deletingPathExtension().appendingPathExtension("summary.json")
                 let encoded = try JSONEncoder().encode(result)
-                try encoded.write(to: jsonSummaryURL, options: .atomic)
+                try encoded.write(to: artifacts.summaryJSON, options: .atomic)
 
                 debugLog.info("Summary generated successfully", category: "AI")
                 summary = result

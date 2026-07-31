@@ -5,7 +5,9 @@ import PackageDescription
 let package = Package(
     name: "EchoNotes",
     platforms: [
-        .macOS(.v14)
+        // Core Audio process taps (system audio capture) need macOS 14.2+;
+        // we target 15 for a stable baseline.
+        .macOS(.v15)
     ],
     products: [
         .executable(name: "EchoNotes", targets: ["EchoNotes"])

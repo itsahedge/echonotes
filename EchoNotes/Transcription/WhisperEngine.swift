@@ -90,6 +90,142 @@ final class WhisperEngine: @unchecked Sendable {
         return merged
     }
 
+    // MARK: - Session (two-track) transcription
+
+    /// One track of a session folder to transcribe.
+    struct SessionTrack: Sendable {
+        let url: URL
+        let speaker: Speaker
+        /// Seconds this track's first buffer lagged the session's earliest
+        /// track. Added to every segment so both tracks share one clock.
+        let startOffset: TimeInterval
+    }
+
+    /// Transcribe a session's tracks independently and merge by timestamp.
+    /// mic.caf → "You", system.caf → "Them" — diarization without a speaker
+    /// model. One bad track (empty, truncated by a crash) doesn't cost the
+    /// other track's transcript.
+    func transcribeSession(
+        tracks: [SessionTrack],
+        progressCallback: (@Sendable (Double) -> Void)? = nil
+    ) async throws -> [TranscriptSegment] {
+        var merged: [TranscriptSegment] = []
+        let fraction = 1.0 / Double(max(tracks.count, 1))
+
+        for (index, track) in tracks.enumerated() {
+            try Task.checkCancellation()
+            do {
+                let samples = try Self.loadMono16k(url: track.url)
+                if samples.contains(where: { abs($0) > Self.silenceThreshold }) {
+                    let segments = try await transcribeSamples(samples, speaker: track.speaker.rawValue)
+                    merged += segments.map {
+                        TranscriptSegment(
+                            startTime: $0.startTime + track.startOffset,
+                            endTime: $0.endTime + track.startOffset,
+                            text: $0.text,
+                            speaker: $0.speaker
+                        )
+                    }
+                } else {
+                    logger.info("Track \(track.url.lastPathComponent) is silent — skipping")
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                logger.error("Skipping track \(track.url.lastPathComponent): \(error.localizedDescription)")
+            }
+            progressCallback?(fraction * Double(index + 1))
+        }
+
+        merged.sort { $0.startTime < $1.startTime }
+        logger.info("Session transcription complete: \(merged.count) segments")
+        return merged
+    }
+
+    /// Load an audio file as 16kHz mono Float32, reading and converting in
+    /// chunks so peak memory stays proportional to the 16kHz output rather
+    /// than the source file.
+    nonisolated static func loadMono16k(url: URL) throws -> [Float] {
+        let file = try AVAudioFile(forReading: url)
+        guard file.length > 0 else { return [] }
+
+        let srcFormat = file.processingFormat
+        guard let dstFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false
+        ) else {
+            throw NSError(domain: "com.echonotes.whisper", code: 5,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to create 16kHz format"])
+        }
+
+        if srcFormat.sampleRate == dstFormat.sampleRate, srcFormat.channelCount == 1 {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: AVAudioFrameCount(file.length)) else {
+                throw NSError(domain: "com.echonotes.whisper", code: 2,
+                              userInfo: [NSLocalizedDescriptionKey: "Failed to create audio buffer"])
+            }
+            try file.read(into: buffer)
+            guard let data = buffer.floatChannelData else { return [] }
+            return Array(UnsafeBufferPointer(start: data[0], count: Int(buffer.frameLength)))
+        }
+
+        guard let converter = AVAudioConverter(from: srcFormat, to: dstFormat) else {
+            throw NSError(domain: "com.echonotes.whisper", code: 4,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to create resampler"])
+        }
+
+        let chunkFrames: AVAudioFrameCount = 1 << 18 // ~5.5s at 48kHz per chunk
+        let ratio = dstFormat.sampleRate / srcFormat.sampleRate
+        var out: [Float] = []
+        out.reserveCapacity(Int(Double(file.length) * ratio) + 1024)
+
+        while file.framePosition < file.length {
+            guard let inBuf = AVAudioPCMBuffer(pcmFormat: srcFormat, frameCapacity: chunkFrames) else { break }
+            try file.read(into: inBuf, frameCount: chunkFrames)
+            guard inBuf.frameLength > 0 else { break }
+
+            let capacity = AVAudioFrameCount(Double(inBuf.frameLength) * ratio) + 256
+            guard let outBuf = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: capacity) else { break }
+
+            let didProvideInput = OSAllocatedUnfairLock(initialState: false)
+            var err: NSError?
+            converter.convert(to: outBuf, error: &err) { _, status in
+                let shouldProvideInput = didProvideInput.withLock { hasProvidedInput in
+                    guard !hasProvidedInput else { return false }
+                    hasProvidedInput = true
+                    return true
+                }
+                if shouldProvideInput {
+                    status.pointee = .haveData
+                    return inBuf
+                }
+                status.pointee = .noDataNow
+                return nil
+            }
+            if let err { throw err }
+
+            if let data = outBuf.floatChannelData, outBuf.frameLength > 0 {
+                out.append(contentsOf: UnsafeBufferPointer(start: data[0], count: Int(outBuf.frameLength)))
+            }
+        }
+
+        // Drain the converter's buffered tail — a sample-rate converter holds
+        // frames internally, and without an end-of-stream flush the last
+        // fraction of the track is silently dropped.
+        while true {
+            guard let outBuf = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: 4096) else { break }
+            var err: NSError?
+            let status = converter.convert(to: outBuf, error: &err) { _, outStatus in
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+            if let err { throw err }
+            if let data = outBuf.floatChannelData, outBuf.frameLength > 0 {
+                out.append(contentsOf: UnsafeBufferPointer(start: data[0], count: Int(outBuf.frameLength)))
+            }
+            if status == .endOfStream || outBuf.frameLength == 0 { break }
+        }
+        return out
+    }
+
     /// Check if an audio file has 2+ channels without reading the full file.
     nonisolated static func isStereo(url: URL) -> Bool {
         guard let file = try? AVAudioFile(forReading: url) else { return false }

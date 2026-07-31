@@ -1,206 +1,332 @@
-import ScreenCaptureKit
 import AVFoundation
-import AppKit
-import CoreMedia
+import CoreAudio
+import Foundation
 import os
 
-/// Captures system-wide audio output using ScreenCaptureKit's audio API.
+/// Captures all system audio output via a Core Audio process tap
+/// (macOS 14.2+), streaming it straight into an AAC-in-CAF file.
 ///
-/// **AUDIO-ONLY MODE** — No video, screen, or visual data is captured.
+/// No virtual device and no Screen Recording permission: the tap mixes every
+/// process's output to stereo and hands us buffers through a private
+/// aggregate device. First use triggers the one-time "System Audio Recording"
+/// TCC prompt. This replaces the previous ScreenCaptureKit capture, whose
+/// SCStream/XPC state had to be torn down and rebuilt around sleep — a
+/// recurring source of post-sleep failures.
 ///
-/// This captures what the user hears (system audio output):
-/// - Other people on calls (Zoom, Meet, FaceTime, Discord, etc.)
-/// - Any audio playing through the system
-///
-/// Requires "Screen & System Audio Recording" permission (macOS requirement for audio API access).
-final class SystemAudioCapture: NSObject, @unchecked Sendable {
+/// CAF on purpose: unlike m4a it needs no finalization pass, so a crash
+/// mid-meeting loses nothing already written to disk.
+final class SystemAudioCapture: @unchecked Sendable {
+    /// Downmixed 48kHz mono samples for level metering and live transcription.
+    /// Called on the capture queue — must be thread-safe.
     var onBuffer: ((SourcedAudioBuffer) -> Void)?
+    /// Called once on the first unrecoverable file-write error.
     var onError: ((Error) -> Void)?
-    
+
+    /// Wall-clock time of the first captured buffer — the track's true start,
+    /// used to offset-align the two tracks' transcript timestamps.
+    var firstBufferAt: Date? { _firstBufferAt.withLock { $0 } }
+
     static func availableDevices() -> [String] {
-        // Return empty array - system audio doesn't have selectable devices on macOS
-        return []
+        // System audio has no selectable devices — the tap covers everything.
+        []
     }
 
-    private var stream: SCStream?
-    private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
-    private let _pendingResume = OSAllocatedUnfairLock(initialState: false)
-    private let logger = Logger(subsystem: "com.echonotes", category: "SystemAudioCapture")
-    private var sleepObserver: NSObjectProtocol?
-    private var wakeObserver: NSObjectProtocol?
-    private var capturedSampleRate: Double = AudioConfig.sampleRate
+    enum CaptureError: LocalizedError {
+        case tapCreationFailed(OSStatus)
+        case tapFormatUnreadable(OSStatus)
+        case aggregateCreationFailed(OSStatus)
+        case ioProcCreationFailed(OSStatus)
+        case deviceStartFailed(OSStatus)
+        case fileCreationFailed(Error)
+        case formatCreationFailed
 
-    /// Start capturing system audio at the given sample rate (mono Float32).
-    func startCapture(sampleRate: Double = AudioConfig.sampleRate) async throws {
-        guard _isCapturing.withLock({ !$0 }) else { return }
-        capturedSampleRate = sampleRate
-        installSleepWakeObservers()
-
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        guard let display = content.displays.first else {
-            throw CaptureError.noDisplayFound
+        var errorDescription: String? {
+            switch self {
+            case .tapCreationFailed(let s):
+                return "System audio tap creation failed (OSStatus \(s)). "
+                    + "Enable EchoNotes under System Settings → Privacy & Security → "
+                    + "Screen & System Audio Recording → System Audio Recording Only, then try again."
+            case .tapFormatUnreadable(let s):
+                return "Couldn't read the system audio format (OSStatus \(s))."
+            case .aggregateCreationFailed(let s):
+                return "Audio device setup failed (OSStatus \(s))."
+            case .ioProcCreationFailed(let s):
+                return "Audio callback setup failed (OSStatus \(s))."
+            case .deviceStartFailed(let s):
+                return "Couldn't start system audio capture (OSStatus \(s))."
+            case .fileCreationFailed(let e):
+                return "Couldn't create the system audio file: \(e.localizedDescription)"
+            case .formatCreationFailed:
+                return "Couldn't create the system audio processing format."
+            }
         }
+    }
 
-        let filter = SCContentFilter(display: display, excludingWindows: [])
-        let config = SCStreamConfiguration()
+    private let logger = Logger(subsystem: "com.echonotes", category: "SystemAudioCapture")
+    /// Serial queue that receives IO proc callbacks and owns `file`/`converter`
+    /// once capture is running.
+    private let queue = DispatchQueue(label: "com.echonotes.system-tap")
 
-        // Audio-only configuration
-        config.capturesAudio = true
-        config.sampleRate = Int(sampleRate)
-        config.channelCount = 1
-        config.excludesCurrentProcessAudio = true
+    private var tapID = AudioObjectID(kAudioObjectUnknown)
+    private var aggregateID = AudioObjectID(kAudioObjectUnknown)
+    private var procID: AudioDeviceIOProcID?
+    private var file: AVAudioFile?
+    /// Converts tap-format buffers to 48kHz mono for `onBuffer` consumers.
+    /// Nil when the tap already delivers 48kHz mono.
+    private var converter: AVAudioConverter?
+    private var monoFormat: AVAudioFormat?
 
-        // Set minimal video config (we only register for .audio output, so no video data is processed)
-        // ScreenCaptureKit requires a video configuration even for audio-only capture.
-        // We use the smallest possible dimensions (2x2) to minimize overhead.
-        // If 2x2 fails on some systems, we fallback to 16x16.
-        config.width = 2
-        config.height = 2
-        config.minimumFrameInterval = CMTime(value: 1, timescale: 1)
-        config.showsCursor = false
+    private let _isCapturing = OSAllocatedUnfairLock(initialState: false)
+    private let _isPaused = OSAllocatedUnfairLock(initialState: false)
+    private let _firstBufferAt = OSAllocatedUnfairLock<Date?>(initialState: nil)
+    private let _writeFailed = OSAllocatedUnfairLock(initialState: false)
 
-        let stream = SCStream(filter: filter, configuration: config, delegate: self)
-        try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
-        
-        // Try to start with 2x2, fallback to 16x16 if it fails
+    /// Start capturing system audio into `url` (use a .caf extension).
+    func start(writingTo url: URL) throws {
+        guard _isCapturing.withLock({ !$0 }) else { return }
+        _firstBufferAt.withLock { $0 = nil }
+        _writeFailed.withLock { $0 = false }
+
+        let description = CATapDescription(stereoGlobalTapButExcludeProcesses: [])
+        description.name = "EchoNotes system tap"
+        description.isPrivate = true
+        description.muteBehavior = .unmuted
+
+        var newTapID = AudioObjectID(kAudioObjectUnknown)
+        let status = AudioHardwareCreateProcessTap(description, &newTapID)
+        guard status == noErr else { throw CaptureError.tapCreationFailed(status) }
+        tapID = newTapID
+
         do {
-            try await stream.startCapture()
-            self.stream = stream
+            let format = try readTapFormat()
+            try createAggregateDevice(tapUUID: description.uuid)
+            file = try Self.makeFile(url: url, format: format)
+            try setUpMonoFeed(from: format)
+            try installIOProc(format: format)
         } catch {
-            logger.warning("Failed to start capture with 2x2 config, retrying with 16x16: \(error.localizedDescription)")
-            config.width = 16
-            config.height = 16
-            
-            // Clean up the original stream before creating a new one to avoid leaking the delegate reference
-            try? stream.removeStreamOutput(self, type: .audio)
-            
-            // Create a NEW stream with updated config (old stream may be in bad state)
-            let fallbackStream = SCStream(filter: filter, configuration: config, delegate: self)
-            try fallbackStream.addStreamOutput(self, type: .audio, sampleHandlerQueue: .global(qos: .userInteractive))
-            try await fallbackStream.startCapture()
-            self.stream = fallbackStream
+            teardown()
+            throw error
         }
 
         _isCapturing.withLock { $0 = true }
+        logger.info("System tap capture started → \(url.lastPathComponent)")
     }
 
-    func stopCapture() async {
+    /// Stop the IO proc but keep the tap, device, and open file — resumable.
+    func pauseCapture() {
+        guard _isCapturing.withLock({ $0 }), _isPaused.withLock({ !$0 }) else { return }
+        if let procID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateID, procID)
+        }
+        _isPaused.withLock { $0 = true }
+    }
+
+    /// Restart the IO proc after a pause.
+    func resumeCapture() throws {
+        guard _isCapturing.withLock({ $0 }), _isPaused.withLock({ $0 }) else { return }
+        guard let procID, aggregateID != kAudioObjectUnknown else { return }
+        let status = AudioDeviceStart(aggregateID, procID)
+        guard status == noErr else { throw CaptureError.deviceStartFailed(status) }
+        _isPaused.withLock { $0 = false }
+    }
+
+    /// Stop capturing, tear down the tap, and close the file. Idempotent.
+    func stopCapture() {
         guard _isCapturing.withLock({ $0 }) else { return }
-        removeSleepWakeObservers()
-        if let stream {
-            try? await stream.stopCapture()
-            self.stream = nil
-        }
         _isCapturing.withLock { $0 = false }
-        _pendingResume.withLock { $0 = false }
+        _isPaused.withLock { $0 = false }
+        if let procID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceStop(aggregateID, procID)
+        }
+        teardown()
     }
 
-    // MARK: - Sleep/Wake Handling
+    // MARK: - Setup
 
-    /// Tear down the SCStream before sleep to prevent stale XPC connections.
-    /// On wake, re-create the stream if we were capturing.
-    private func installSleepWakeObservers() {
-        let workspace = NSWorkspace.shared.notificationCenter
-
-        sleepObserver = workspace.addObserver(
-            forName: NSWorkspace.willSleepNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            let wasCapturing = self._isCapturing.withLock { $0 }
-            guard wasCapturing else { return }
-            self.logger.info("System going to sleep — tearing down SCStream to prevent stale state")
-            self._pendingResume.withLock { $0 = true }
-            // Synchronously nil out the stream to prevent delegate callbacks on a dead XPC connection
-            if let stream = self.stream {
-                try? stream.removeStreamOutput(self, type: .audio)
-            }
-            self.stream = nil
+    private func readTapFormat() throws -> AVAudioFormat {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioTapPropertyFormat,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var asbd = AudioStreamBasicDescription()
+        var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        let status = AudioObjectGetPropertyData(tapID, &address, 0, nil, &size, &asbd)
+        guard status == noErr, let format = AVAudioFormat(streamDescription: &asbd) else {
+            throw CaptureError.tapFormatUnreadable(status)
         }
-
-        wakeObserver = workspace.addObserver(
-            forName: NSWorkspace.didWakeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            guard let self else { return }
-            guard self._pendingResume.withLock({ $0 }) else { return }
-            self.logger.info("System woke up — re-creating SCStream")
-            self._pendingResume.withLock { $0 = false }
-            Task {
-                // Brief delay to let ScreenCaptureKit daemon stabilize after wake
-                try? await Task.sleep(for: .seconds(1))
-                do {
-                    // Temporarily mark as not capturing so startCapture guard passes
-                    self._isCapturing.withLock { $0 = false }
-                    try await self.startCapture(sampleRate: self.capturedSampleRate)
-                } catch {
-                    self.logger.error("Failed to resume system audio after wake: \(error.localizedDescription)")
-                    self.onError?(error)
-                }
-            }
-        }
+        return format
     }
 
-    private func removeSleepWakeObservers() {
-        let workspace = NSWorkspace.shared.notificationCenter
-        if let observer = sleepObserver {
-            workspace.removeObserver(observer)
-            sleepObserver = nil
-        }
-        if let observer = wakeObserver {
-            workspace.removeObserver(observer)
-            wakeObserver = nil
-        }
+    private func createAggregateDevice(tapUUID: UUID) throws {
+        let desc: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "EchoNotes-tap",
+            kAudioAggregateDeviceUIDKey: UUID().uuidString,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceSubDeviceListKey: [] as [[String: Any]],
+            kAudioAggregateDeviceTapListKey: [
+                [
+                    kAudioSubTapUIDKey: tapUUID.uuidString,
+                    kAudioSubTapDriftCompensationKey: true,
+                ]
+            ],
+        ]
+        var newAggregateID = AudioObjectID(kAudioObjectUnknown)
+        let status = AudioHardwareCreateAggregateDevice(desc as CFDictionary, &newAggregateID)
+        guard status == noErr else { throw CaptureError.aggregateCreationFailed(status) }
+        aggregateID = newAggregateID
     }
-}
 
-extension SystemAudioCapture: SCStreamOutput {
-    /// Receives audio sample buffers from ScreenCaptureKit.
-    /// We only registered for .audio type, so no video data is processed here.
-    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        // Only process audio buffers (we only registered for .audio type)
-        guard type == .audio, sampleBuffer.isValid else { return }
-        // Guard against callbacks from a stream we've already torn down (e.g. post-sleep)
-        guard self.stream === stream else { return }
-        guard let dataBuffer = sampleBuffer.dataBuffer else { return }
-
-        let length = dataBuffer.dataLength
-        let floatCount = length / MemoryLayout<Float>.size
-
+    private static func makeFile(url: URL, format: AVAudioFormat) throws -> AVAudioFile {
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount,
+        ]
         do {
-            // Single-copy approach: access buffer bytes directly without intermediate Data allocation
-            let samples = try dataBuffer.withContiguousStorage { ptr in
-                Array(UnsafeBufferPointer(start: ptr.baseAddress?.assumingMemoryBound(to: Float.self),
-                                          count: floatCount))
-            }
-            onBuffer?(SourcedAudioBuffer(samples: samples, source: .system))
+            return try AVAudioFile(
+                forWriting: url,
+                settings: settings,
+                commonFormat: format.commonFormat,
+                interleaved: format.isInterleaved
+            )
         } catch {
-            logger.error("Error extracting system audio: \(error.localizedDescription)")
+            throw CaptureError.fileCreationFailed(error)
         }
     }
-}
 
-extension SystemAudioCapture: SCStreamDelegate {
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        logger.error("System audio stream stopped with error: \(error.localizedDescription)")
-        // Guard against delegate calls on a stream we've already torn down
-        guard self.stream === stream else {
-            logger.info("Ignoring didStopWithError for a detached stream (likely post-sleep cleanup)")
+    /// Prepare the 48kHz mono conversion used for level meters and live
+    /// transcription. The file itself is written in the tap's native format.
+    private func setUpMonoFeed(from tapFormat: AVAudioFormat) throws {
+        guard let mono = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32,
+            sampleRate: AudioConfig.sampleRate,
+            channels: 1,
+            interleaved: false
+        ) else {
+            throw CaptureError.formatCreationFailed
+        }
+        monoFormat = mono
+
+        if tapFormat.sampleRate == mono.sampleRate,
+           tapFormat.channelCount == 1,
+           tapFormat.commonFormat == .pcmFormatFloat32 {
+            converter = nil
             return
         }
-        self.stream = nil
-        _isCapturing.withLock { $0 = false }
+        guard let conv = AVAudioConverter(from: tapFormat, to: mono) else {
+            throw CaptureError.formatCreationFailed
+        }
+        converter = conv
+    }
+
+    private func installIOProc(format: AVAudioFormat) throws {
+        var newProcID: AudioDeviceIOProcID?
+        let status = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, queue) {
+            [weak self] _, inInputData, _, _, _ in
+            self?.handleInput(inInputData, format: format)
+        }
+        guard status == noErr, let newProcID else {
+            throw CaptureError.ioProcCreationFailed(status)
+        }
+        procID = newProcID
+
+        let startStatus = AudioDeviceStart(aggregateID, newProcID)
+        guard startStatus == noErr else { throw CaptureError.deviceStartFailed(startStatus) }
+    }
+
+    // MARK: - Capture path (runs on `queue`)
+
+    private func handleInput(_ inputData: UnsafePointer<AudioBufferList>, format: AVAudioFormat) {
+        guard let file, !_writeFailed.withLock({ $0 }) else { return }
+        _firstBufferAt.withLock { if $0 == nil { $0 = Date() } }
+
+        guard let buffer = AVAudioPCMBuffer(
+            pcmFormat: format,
+            bufferListNoCopy: inputData,
+            deallocator: nil
+        ) else { return }
+
+        do {
+            try file.write(from: buffer)
+        } catch {
+            reportWriteFailure(error)
+            return
+        }
+
+        guard onBuffer != nil, let samples = monoSamples(from: buffer) else { return }
+        onBuffer?(SourcedAudioBuffer(samples: samples, source: .system))
+    }
+
+    private func monoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
+        guard let converter, let monoFormat else {
+            // Tap already delivers 48kHz mono float.
+            guard let data = buffer.floatChannelData else { return nil }
+            return Array(UnsafeBufferPointer(start: data[0], count: Int(buffer.frameLength)))
+        }
+
+        let ratio = monoFormat.sampleRate / buffer.format.sampleRate
+        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
+        guard let out = AVAudioPCMBuffer(pcmFormat: monoFormat, frameCapacity: capacity) else {
+            return nil
+        }
+
+        let didProvideInput = OSAllocatedUnfairLock(initialState: false)
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, outStatus in
+            let shouldProvideInput = didProvideInput.withLock { provided in
+                guard !provided else { return false }
+                provided = true
+                return true
+            }
+            if shouldProvideInput {
+                outStatus.pointee = .haveData
+                return buffer
+            }
+            outStatus.pointee = .noDataNow
+            return nil
+        }
+        if let error {
+            logger.error("System audio downmix failed: \(error.localizedDescription)")
+            return nil
+        }
+        guard let data = out.floatChannelData else { return nil }
+        return Array(UnsafeBufferPointer(start: data[0], count: Int(out.frameLength)))
+    }
+
+    private func reportWriteFailure(_ error: Error) {
+        let firstFailure = _writeFailed.withLock { failed -> Bool in
+            guard !failed else { return false }
+            failed = true
+            return true
+        }
+        guard firstFailure else { return }
+        logger.error("System track write failed: \(error.localizedDescription)")
         onError?(error)
     }
-}
 
-enum CaptureError: LocalizedError {
-    case noDisplayFound
-    var errorDescription: String? {
-        switch self {
-        case .noDisplayFound: return "No display found for audio capture."
+    // MARK: - Teardown
+
+    private func teardown() {
+        if let procID, aggregateID != kAudioObjectUnknown {
+            AudioDeviceDestroyIOProcID(aggregateID, procID)
+        }
+        procID = nil
+        if aggregateID != kAudioObjectUnknown {
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = AudioObjectID(kAudioObjectUnknown)
+        }
+        if tapID != kAudioObjectUnknown {
+            AudioHardwareDestroyProcessTap(tapID)
+            tapID = AudioObjectID(kAudioObjectUnknown)
+        }
+        // Serialize with any in-flight IO block before closing the file.
+        queue.sync {
+            self.file = nil
+            self.converter = nil
+            self.monoFormat = nil
         }
     }
 }
